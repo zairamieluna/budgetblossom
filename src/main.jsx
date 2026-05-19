@@ -27,8 +27,7 @@ async function supabaseGet() {
 
 async function supabaseUpsert(data) {
   try {
-    // Try PATCH first (update existing row)
-    const patch = await fetch(
+    await fetch(
       `${SUPABASE_URL}/rest/v1/user_data?user_id=eq.${USER_ID}`,
       {
         method: 'PATCH',
@@ -36,27 +35,23 @@ async function supabaseUpsert(data) {
         body: JSON.stringify({ data, updated_at: new Date().toISOString() }),
       }
     )
-    // If no row existed, insert instead
-    if (patch.status === 404 || patch.headers.get('content-range') === '*/0') {
-      await fetch(`${SUPABASE_URL}/rest/v1/user_data`, {
-        method: 'POST',
-        headers: { ...HEADERS, Prefer: 'return=minimal' },
-        body: JSON.stringify({ user_id: USER_ID, data, updated_at: new Date().toISOString() }),
-      })
-    }
   } catch (e) {
     console.warn('Supabase upsert failed:', e)
   }
 }
 
 async function initSync() {
+  // ALWAYS load from Supabase first on every app open
   const cloudData = await supabaseGet()
   if (cloudData) {
+    // Clear local storage first, then load cloud data
+    window.localStorage.clear()
     Object.entries(cloudData).forEach(([key, value]) => {
       window.localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value))
     })
   }
 
+  // Watch for any changes and save to Supabase
   const originalSetItem = window.localStorage.setItem.bind(window.localStorage)
   window.localStorage.setItem = function (key, value) {
     originalSetItem(key, value)
@@ -70,6 +65,28 @@ async function initSync() {
       supabaseUpsert(snapshot)
     }, 2000)
   }
+
+  // Also save when user closes/leaves the app
+  window.addEventListener('beforeunload', () => {
+    const snapshot = {}
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const k = window.localStorage.key(i)
+      snapshot[k] = window.localStorage.getItem(k)
+    }
+    supabaseUpsert(snapshot)
+  })
+
+  // Save when app goes to background on mobile
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      const snapshot = {}
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const k = window.localStorage.key(i)
+        snapshot[k] = window.localStorage.getItem(k)
+      }
+      supabaseUpsert(snapshot)
+    }
+  })
 }
 
 initSync().then(() => {
