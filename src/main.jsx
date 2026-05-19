@@ -4,7 +4,7 @@ import App from './App'
 
 // ── Supabase config ──────────────────────────────────────────
 const SUPABASE_URL = 'https://njdivqtxzjuorlueqxrf.supabase.co'
-const SUPABASE_KEY = 'sb_publishable_K3dBfqoj8eVFLdfSXEaI-A_jAq9yFxE'
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5qZGl2cXR4emp1b3JsdWVxeHJmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyMDU5MTEsImV4cCI6MjA5NDc4MTkxMX0.I4PUAdJctFalUe_HMMP9jzXiq7YWdmCVbsLjbMP4pr4'
 
 // Tiny Supabase REST helper (no npm package needed)
 const USER_ID = 'zaira-ariel' // shared ID so both of you see same data
