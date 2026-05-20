@@ -876,7 +876,6 @@ function IncomeTracker({ state, update }) {
                         {s.hoursWorked}hrs{s.tips > 0 ? ` · Tips: ${fmtD(s.tips)}` : ""} · Gross: {fmtD(s.gross)}
                         {s.statDetails && <span style={{ color: "#F4A261" }}> (stat: {fmtD(s.statDetails.statEntitlement)} + {fmtD(s.statDetails.premiumPay)} premium)</span>}
                       </div>
-                      </div>
                     </div>
                     <button onClick={() => removeShift(inc.id, s.id)} style={{ padding: 3, border: "none", background: "transparent", cursor: "pointer" }}>
                       <Icon name="trash" size={13} color="var(--muted)" />
