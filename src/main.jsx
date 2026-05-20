@@ -25,8 +25,7 @@ async function supabaseGet() {
   }
 }
 
-// TRUE upsert — creates the row if missing, updates if exists
-async function supabaseUpsert(data) {
+async function supabaseSave(appState) {
   try {
     await fetch(
       `${SUPABASE_URL}/rest/v1/user_data`,
@@ -38,86 +37,82 @@ async function supabaseUpsert(data) {
         },
         body: JSON.stringify({
           user_id: USER_ID,
-          data,
+          data: { budgetsbloom: JSON.stringify(appState) },
           updated_at: new Date().toISOString(),
         }),
       }
     )
   } catch (e) {
-    console.warn('Supabase upsert failed:', e)
+    console.warn('Supabase save failed:', e)
   }
-}
-
-function getLocalSnapshot() {
-  const snapshot = {}
-  for (let i = 0; i < window.localStorage.length; i++) {
-    const k = window.localStorage.key(i)
-    snapshot[k] = window.localStorage.getItem(k)
-  }
-  return snapshot
-}
-
-function getLocalTimestamp() {
-  return window.localStorage.getItem('_lastSaved') || '2000-01-01T00:00:00.000Z'
 }
 
 async function initSync() {
+  // ALWAYS load from Supabase first on app open
   const row = await supabaseGet()
 
-  if (row && row.data) {
-    const cloudTime = new Date(row.updated_at || 0).getTime()
-    const localTime = new Date(getLocalTimestamp()).getTime()
-
-    if (cloudTime > localTime) {
-      const cloudData = row.data
+  if (row && row.data && row.data.budgetsbloom) {
+    try {
+      const cloudState = JSON.parse(row.data.budgetsbloom)
       const localRaw = window.localStorage.getItem('budgetsbloom')
       const localState = localRaw ? JSON.parse(localRaw) : null
-      let cloudState = null
-      try {
-        const v = cloudData['budgetsbloom']
-        cloudState = v ? JSON.parse(typeof v === 'string' ? v : JSON.stringify(v)) : null
-      } catch {}
 
       if (localState && cloudState) {
-        // Smart merge: preserve local paid status on expenses
-        const mergedExpenses = (cloudState.expenses || []).map(cloudExp => {
-          const localExp = (localState.expenses || []).find(e => e.id === cloudExp.id)
-          if (localExp) return { ...cloudExp, paid: localExp.paid }
-          return cloudExp
-        })
-        const merged = { ...cloudState, expenses: mergedExpenses }
-        const originalSetItem = window.localStorage.setItem.bind(window.localStorage)
-        originalSetItem('budgetsbloom', JSON.stringify(merged))
-        supabaseUpsert({ ...cloudData, budgetsbloom: JSON.stringify(merged) })
-      } else {
-        const originalSetItem = window.localStorage.setItem.bind(window.localStorage)
-        Object.entries(cloudData).forEach(([key, value]) => {
-          originalSetItem(key, typeof value === 'string' ? value : JSON.stringify(value))
-        })
+        // Merge: cloud wins for everything, but keep local paid status
+        // ONLY if local is newer than cloud (user just toggled something)
+        const localTime = new Date(window.localStorage.getItem('_lastSaved') || 0).getTime()
+        const cloudTime = new Date(row.updated_at || 0).getTime()
+        const localIsVeryRecent = (Date.now() - localTime) < 10000 // within last 10 seconds
+
+        if (localIsVeryRecent && localTime > cloudTime) {
+          // Local was just changed — push local up to cloud
+          console.log('Local just changed — pushing to cloud')
+          await supabaseSave(localState)
+        } else {
+          // Cloud is the source of truth — load it
+          console.log('Loading from cloud')
+          window.localStorage.setItem('budgetsbloom', JSON.stringify(cloudState))
+        }
+      } else if (cloudState) {
+        // No local data — load from cloud
+        console.log('No local data — loading from cloud')
+        window.localStorage.setItem('budgetsbloom', JSON.stringify(cloudState))
       }
-    } else {
-      supabaseUpsert(getLocalSnapshot())
+    } catch (e) {
+      console.warn('Sync merge failed:', e)
     }
   } else {
-    // No cloud row yet — create it from local data
-    supabaseUpsert(getLocalSnapshot())
+    // Nothing in cloud yet — push local data up
+    const localRaw = window.localStorage.getItem('budgetsbloom')
+    if (localRaw) {
+      console.log('No cloud data — pushing local to cloud')
+      await supabaseSave(JSON.parse(localRaw))
+    }
   }
 
-  // Watch for changes and save to Supabase
-  const originalSetItem = window.localStorage.setItem.bind(window.localStorage)
+  // Watch for app state changes and save to Supabase
+  const _originalSetItem = window.localStorage.setItem.bind(window.localStorage)
   window.localStorage.setItem = function (key, value) {
-    originalSetItem(key, value)
-    originalSetItem('_lastSaved', new Date().toISOString())
-    clearTimeout(window._supabaseSaveTimer)
-    window._supabaseSaveTimer = setTimeout(() => {
-      supabaseUpsert(getLocalSnapshot())
-    }, 2000)
+    _originalSetItem(key, value)
+    if (key === 'budgetsbloom') {
+      _originalSetItem('_lastSaved', new Date().toISOString())
+      clearTimeout(window._supabaseSaveTimer)
+      window._supabaseSaveTimer = setTimeout(() => {
+        try {
+          const state = JSON.parse(value)
+          supabaseSave(state)
+        } catch {}
+      }, 1500)
+    }
   }
 
-  // Save when app goes to background on mobile
+  // Also save immediately when app is backgrounded (closing iPhone app)
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
-      supabaseUpsert(getLocalSnapshot())
+      const raw = window.localStorage.getItem('budgetsbloom')
+      if (raw) {
+        try { supabaseSave(JSON.parse(raw)) } catch {}
+      }
     }
   })
 }
