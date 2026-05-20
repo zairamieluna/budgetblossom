@@ -25,14 +25,22 @@ async function supabaseGet() {
   }
 }
 
+// TRUE upsert — creates the row if missing, updates if exists
 async function supabaseUpsert(data) {
   try {
     await fetch(
-      `${SUPABASE_URL}/rest/v1/user_data?user_id=eq.${USER_ID}`,
+      `${SUPABASE_URL}/rest/v1/user_data`,
       {
-        method: 'PATCH',
-        headers: HEADERS,
-        body: JSON.stringify({ data, updated_at: new Date().toISOString() }),
+        method: 'POST',
+        headers: {
+          ...HEADERS,
+          'Prefer': 'resolution=merge-duplicates',
+        },
+        body: JSON.stringify({
+          user_id: USER_ID,
+          data,
+          updated_at: new Date().toISOString(),
+        }),
       }
     )
   } catch (e) {
@@ -61,10 +69,7 @@ async function initSync() {
     const localTime = new Date(getLocalTimestamp()).getTime()
 
     if (cloudTime > localTime) {
-      console.log('Cloud is newer — smart-merging into local...')
       const cloudData = row.data
-
-      // Parse both local and cloud app state
       const localRaw = window.localStorage.getItem('budgetsbloom')
       const localState = localRaw ? JSON.parse(localRaw) : null
       let cloudState = null
@@ -74,33 +79,28 @@ async function initSync() {
       } catch {}
 
       if (localState && cloudState) {
-        // Smart merge: cloud wins on everything EXCEPT user interaction fields
-        // Preserve local `paid` status on expenses — user may have just checked/unchecked
+        // Smart merge: preserve local paid status on expenses
         const mergedExpenses = (cloudState.expenses || []).map(cloudExp => {
           const localExp = (localState.expenses || []).find(e => e.id === cloudExp.id)
-          if (localExp) {
-            // Keep local paid status — it's the most recently toggled by the user
-            return { ...cloudExp, paid: localExp.paid }
-          }
+          if (localExp) return { ...cloudExp, paid: localExp.paid }
           return cloudExp
         })
-
         const merged = { ...cloudState, expenses: mergedExpenses }
         const originalSetItem = window.localStorage.setItem.bind(window.localStorage)
         originalSetItem('budgetsbloom', JSON.stringify(merged))
-        // Push merged result back to cloud so they stay in sync
         supabaseUpsert({ ...cloudData, budgetsbloom: JSON.stringify(merged) })
       } else {
-        // No local app state — safe to load cloud wholesale
         const originalSetItem = window.localStorage.setItem.bind(window.localStorage)
         Object.entries(cloudData).forEach(([key, value]) => {
           originalSetItem(key, typeof value === 'string' ? value : JSON.stringify(value))
         })
       }
     } else {
-      console.log('Local data is newer — pushing to cloud...')
       supabaseUpsert(getLocalSnapshot())
     }
+  } else {
+    // No cloud row yet — create it from local data
+    supabaseUpsert(getLocalSnapshot())
   }
 
   // Watch for changes and save to Supabase
