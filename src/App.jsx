@@ -99,6 +99,102 @@ const fmtD = (n) => new Intl.NumberFormat("en-CA", { style: "currency", currency
 const today = new Date().toISOString().split("T")[0];
 const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
+// ─── ONTARIO STAT HOLIDAYS ───────────────────────────────────────────────────
+function getOntarioStatHolidays(year) {
+  const y = year;
+  // Helper: nth weekday of a month (1=Mon…7=Sun, nth 1-based)
+  function nthWeekday(month, weekday, nth) {
+    const d = new Date(y, month - 1, 1);
+    let count = 0;
+    while (d.getMonth() === month - 1) {
+      if (d.getDay() === weekday % 7) { // JS: 0=Sun,1=Mon…6=Sat; pass 1-7 where 7=Sun
+        count++;
+        if (count === nth) return d.toISOString().split("T")[0];
+      }
+      d.setDate(d.getDate() + 1);
+    }
+    return null;
+  }
+  // Last weekday of month
+  function lastWeekday(month, weekday) {
+    const d = new Date(y, month, 0); // last day of month
+    while (d.getDay() !== weekday % 7) d.setDate(d.getDate() - 1);
+    return d.toISOString().split("T")[0];
+  }
+  // Easter Sunday (Anonymous Gregorian algorithm)
+  function easterSunday() {
+    const a = y % 19, b = Math.floor(y / 100), c = y % 100;
+    const d2 = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25);
+    const g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d2 - g + 15) % 30;
+    const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7;
+    const m = Math.floor((a + 11 * h + 22 * l) / 451);
+    const month = Math.floor((h + l - 7 * m + 114) / 31);
+    const day = ((h + l - 7 * m + 114) % 31) + 1;
+    return new Date(y, month - 1, day);
+  }
+  const easter = easterSunday();
+  const goodFriday = new Date(easter); goodFriday.setDate(easter.getDate() - 2);
+  const victoriaDay = lastWeekday(5, 1); // last Monday before May 25
+  // Victoria Day: last Monday on or before May 24
+  function victoriaDayCalc() {
+    const d = new Date(y, 4, 24);
+    while (d.getDay() !== 1) d.setDate(d.getDate() - 1);
+    return d.toISOString().split("T")[0];
+  }
+  return new Set([
+    `${y}-01-01`,                          // New Year's Day
+    nthWeekday(2, 1, 3),                   // Family Day – 3rd Monday Feb
+    goodFriday.toISOString().split("T")[0],// Good Friday
+    victoriaDayCalc(),                     // Victoria Day
+    `${y}-07-01`,                          // Canada Day (or Jul 2 if Sun)
+    nthWeekday(8, 1, 1),                   // Civic Holiday – 1st Monday Aug
+    nthWeekday(9, 1, 1),                   // Labour Day – 1st Monday Sep
+    nthWeekday(10, 1, 2),                  // Thanksgiving – 2nd Monday Oct
+    `${y}-12-25`,                          // Christmas Day
+    `${y}-12-26`,                          // Boxing Day
+  ].filter(Boolean));
+}
+
+function isStatHoliday(dateStr) {
+  if (!dateStr) return false;
+  const year = parseInt(dateStr.slice(0, 4));
+  return getOntarioStatHolidays(year).has(dateStr);
+}
+
+function getStatHolidayName(dateStr) {
+  if (!dateStr) return null;
+  const year = parseInt(dateStr.slice(0, 4));
+  const holidays = getOntarioStatHolidays(year);
+  if (!holidays.has(dateStr)) return null;
+  const names = {
+    "01-01": "New Year's Day",
+    "07-01": "Canada Day",
+    "07-02": "Canada Day (observed)",
+    "12-25": "Christmas Day",
+    "12-26": "Boxing Day",
+  };
+  const mmdd = dateStr.slice(5);
+  if (names[mmdd]) return names[mmdd];
+  const d = new Date(dateStr + "T12:00:00");
+  const mon = d.getMonth() + 1;
+  const day = d.getDate();
+  if (mon === 2) return "Family Day";
+  if (mon === 5) return "Victoria Day";
+  if (mon === 8) return "Civic Holiday";
+  if (mon === 9) return "Labour Day";
+  if (mon === 10) return "Thanksgiving";
+  // Good Friday detection: not easy by date alone, check proximity to Easter
+  return "Statutory Holiday";
+}
+
+// Stat holiday pay for Ontario: regular pay + stat pay (avg daily earnings based on 4-week lookback)
+// Simplified: if worked on stat, pays 1.5x for hours worked + regular stat entitlement
+function computeStatPay(hourlyRate, hoursWorked, regularDailyAvg) {
+  const statEntitlement = regularDailyAvg || (hourlyRate * 8); // fallback to 8hr avg
+  const premiumPay = hoursWorked * hourlyRate * 1.5;
+  return { statEntitlement, premiumPay, total: statEntitlement + premiumPay };
+}
+
 function computeShiftPay(hourlyRate, hoursPerWeek, frequency) {
   const periodsPerYear = frequency === "weekly" ? 52 : frequency === "biweekly" ? 26 : 12;
   const annualGross = hourlyRate * hoursPerWeek * (frequency === "biweekly" ? 2 : frequency === "weekly" ? 1 : 4.33);
@@ -543,11 +639,41 @@ function IncomeTracker({ state, update }) {
     const totalMins = (eh * 60 + em) - (sh * 60 + sm) - Number(breakMins);
     const hoursWorked = Math.max(0, totalMins / 60);
     const inc = state.incomes.find(i => i.id === incId);
-    const gross = hoursWorked * (inc?.hourlyRate || 0) + Number(tips);
-    const { netPay: perPeriodNet } = computeShiftPay(inc?.hourlyRate || 0, hoursWorked, "weekly");
+    const rate = inc?.hourlyRate || 0;
+
+    // Stat holiday detection
+    const statHoliday = isStatHoliday(date);
+    const statName = statHoliday ? getStatHolidayName(date) : null;
+
+    // Gross: if stat, use 1.5x premium for hours worked + stat entitlement (avg daily = rate * 8)
+    let gross, statDetails;
+    if (statHoliday && worked) {
+      const { statEntitlement, premiumPay, total } = computeStatPay(rate, hoursWorked, rate * 8);
+      gross = total + Number(tips);
+      statDetails = { statEntitlement: parseFloat(statEntitlement.toFixed(2)), premiumPay: parseFloat(premiumPay.toFixed(2)) };
+    } else if (statHoliday && !worked) {
+      // Didn't work on stat — entitled to stat pay only (avg daily earnings)
+      gross = rate * 8 + Number(tips);
+      statDetails = { statEntitlement: parseFloat((rate * 8).toFixed(2)), premiumPay: 0 };
+    } else {
+      gross = hoursWorked * rate + Number(tips);
+      statDetails = null;
+    }
+
+    const { netPay: perPeriodNet } = computeShiftPay(rate, hoursWorked || 8, "weekly");
     const netEst = perPeriodNet + Number(tips);
 
-    const newShift = { id: Date.now(), date, startTime, endTime, breakMins: Number(breakMins), tips: Number(tips), hoursWorked: parseFloat(hoursWorked.toFixed(2)), gross: parseFloat(gross.toFixed(2)), netEst: parseFloat(netEst.toFixed(2)), worked };
+    const newShift = {
+      id: Date.now(), date, startTime, endTime,
+      breakMins: Number(breakMins), tips: Number(tips),
+      hoursWorked: parseFloat(hoursWorked.toFixed(2)),
+      gross: parseFloat(gross.toFixed(2)),
+      netEst: parseFloat(netEst.toFixed(2)),
+      worked,
+      statHoliday,
+      statName,
+      statDetails,
+    };
     update({ incomes: state.incomes.map(i => i.id === incId ? { ...i, dailyShifts: [...(i.dailyShifts || []), newShift].sort((a, b) => b.date.localeCompare(a.date)) } : i) });
     setShiftForm({ date: today, startTime: "09:00", endTime: "17:00", breakMins: 30, tips: 0, worked: true });
   }
@@ -701,16 +827,29 @@ function IncomeTracker({ state, update }) {
                     <Input label="Break (mins)" value={shiftForm.breakMins} onChange={v => setShiftForm(f => ({ ...f, breakMins: v }))} type="number" style={{ marginBottom: 0 }} />
                     <Input label="Tips ($)" value={shiftForm.tips} onChange={v => setShiftForm(f => ({ ...f, tips: v }))} type="number" style={{ marginBottom: 0 }} />
                   </div>
+                  {/* Stat holiday preview */}
+                  {isStatHoliday(shiftForm.date) && (
+                    <div style={{ marginTop: 8, padding: "8px 12px", borderRadius: 10, background: "#F4A26122", fontSize: 13, fontWeight: 700, color: "#F4A261" }}>
+                      🎉 {getStatHolidayName(shiftForm.date)} — Stat pay applies! (1.5x if worked + stat entitlement)
+                    </div>
+                  )}
                   {/* Preview */}
                   {(() => {
                     const [sh, sm] = shiftForm.startTime.split(":").map(Number);
                     const [eh, em] = shiftForm.endTime.split(":").map(Number);
                     const mins = (eh * 60 + em) - (sh * 60 + sm) - Number(shiftForm.breakMins);
                     const hrs = Math.max(0, mins / 60);
-                    const gross = hrs * inc.hourlyRate + Number(shiftForm.tips);
+                    const isStat = isStatHoliday(shiftForm.date);
+                    let gross;
+                    if (isStat && hrs > 0) {
+                      const { total } = computeStatPay(inc.hourlyRate, hrs, inc.hourlyRate * 8);
+                      gross = total + Number(shiftForm.tips);
+                    } else {
+                      gross = hrs * inc.hourlyRate + Number(shiftForm.tips);
+                    }
                     return hrs > 0 ? (
                       <div style={{ marginTop: 10, padding: "8px 12px", borderRadius: 10, background: "var(--accent)15", fontSize: 13 }}>
-                        <span style={{ color: "var(--accent)", fontWeight: 700 }}>Preview: {hrs.toFixed(2)} hrs · Gross ~{fmtD(gross)}</span>
+                        <span style={{ color: "var(--accent)", fontWeight: 700 }}>Preview: {hrs.toFixed(2)} hrs · Gross ~{fmtD(gross)}{isStat ? " 🎉 stat rate" : ""}</span>
                       </div>
                     ) : null;
                   })()}
@@ -727,11 +866,16 @@ function IncomeTracker({ state, update }) {
                       {s.worked && <Icon name="check" size={13} color="#fff" />}
                     </button>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: s.worked ? "var(--text)" : "var(--muted)", textDecoration: s.worked ? "none" : "line-through" }}>
-                        {s.date} · {s.startTime}–{s.endTime}
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: s.worked ? "var(--text)" : "var(--muted)", textDecoration: s.worked ? "none" : "line-through" }}>
+                          {s.date} · {s.startTime}–{s.endTime}
+                        </span>
+                        {s.statHoliday && <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 99, background: "#F4A26122", color: "#F4A261", fontWeight: 700 }}>🎉 {s.statName || "STAT"}</span>}
                       </div>
                       <div style={{ fontSize: 12, color: "var(--muted)" }}>
                         {s.hoursWorked}hrs{s.tips > 0 ? ` · Tips: ${fmtD(s.tips)}` : ""} · Gross: {fmtD(s.gross)}
+                        {s.statDetails && <span style={{ color: "#F4A261" }}> (stat: {fmtD(s.statDetails.statEntitlement)} + {fmtD(s.statDetails.premiumPay)} premium)</span>}
+                      </div>
                       </div>
                     </div>
                     <button onClick={() => removeShift(inc.id, s.id)} style={{ padding: 3, border: "none", background: "transparent", cursor: "pointer" }}>
