@@ -466,6 +466,31 @@ function Dashboard({ state, update }) {
         <p style={{ margin: "4px 0 0", color: "var(--muted)", fontSize: 14 }}>Here's your money bloom for today</p>
       </div>
 
+      {/* NEW: Dashboard alert indicators */}
+      {(() => {
+        const todayDayNum = new Date().getDate();
+        const overdueItems = state.expenses.filter(e => !e.paid && e.dueDay && e.dueDay < todayDayNum);
+        const upcomingItems = state.expenses.filter(e => !e.paid && e.dueDay && e.dueDay >= todayDayNum && e.dueDay - todayDayNum <= 7);
+        const totalUnpaidAmt = overdueItems.reduce((s, e) => s + e.amount, 0) + upcomingItems.reduce((s, e) => s + e.amount, 0);
+        if (overdueItems.length === 0 && upcomingItems.length === 0) return null;
+        return (
+          <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+            {overdueItems.length > 0 && (
+              <div style={{ flex: 1, padding: "10px 14px", borderRadius: 14, background: "#FF6B6B22", border: "1.5px solid #FF6B6B55", cursor: "pointer" }} onClick={() => {}}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: "#FF6B6B" }}>⚠️ {overdueItems.length} overdue</div>
+                <div style={{ fontSize: 12, color: "#FF6B6B", opacity: 0.8 }}>{fmt(overdueItems.reduce((s,e)=>s+e.amount,0))}</div>
+              </div>
+            )}
+            {upcomingItems.length > 0 && (
+              <div style={{ flex: 1, padding: "10px 14px", borderRadius: 14, background: "#F4A26122", border: "1.5px solid #F4A26155" }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: "#F4A261" }}>🔔 {upcomingItems.length} due this week</div>
+                <div style={{ fontSize: 12, color: "#F4A261", opacity: 0.8 }}>{fmt(upcomingItems.reduce((s,e)=>s+e.amount,0))}</div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {/* Key Stats */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
         <StatWidget label="Monthly Income" value={fmt(income)} sub="Combined take-home" icon="income" color="#FF6B9D" />
@@ -972,7 +997,7 @@ function ExpenseTracker({ state, update }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editId, setEditId] = useState(null);
   const [filter, setFilter] = useState("All");
-  const blankForm = { label: "", category: "Fixed", amount: "", dueMonth: "", dueDay: "", paid: false, recurring: false, priority: "medium", notes: "" };
+  const blankForm = { label: "", category: "Fixed", amount: "", dueMonth: "", dueDay: "", paid: false, recurring: false, priority: "medium", notes: "", payType: "Auto Payment", chargeTo: "" };  // UPDATED: added payType, chargeTo
   const [form, setForm] = useState(blankForm);
 
   const CATS = ["All", "Fixed", "Variable", "Custom"];
@@ -980,7 +1005,7 @@ function ExpenseTracker({ state, update }) {
 
   function openAdd() { setForm(blankForm); setEditId(null); setShowAdd(true); }
   function openEdit(exp) {
-    setForm({ label: exp.label, category: exp.category, amount: exp.amount, dueMonth: exp.dueMonth || "", dueDay: exp.dueDay || "", paid: exp.paid, recurring: exp.recurring, priority: exp.priority, notes: exp.notes || "" });
+    setForm({ label: exp.label, category: exp.category, amount: exp.amount, dueMonth: exp.dueMonth || "", dueDay: exp.dueDay || "", paid: exp.paid, recurring: exp.recurring, priority: exp.priority, notes: exp.notes || "", payType: exp.payType || "Auto Payment", chargeTo: exp.chargeTo || "" }); // UPDATED
     setEditId(exp.id); setShowAdd(true);
   }
 
@@ -1075,6 +1100,13 @@ function ExpenseTracker({ state, update }) {
                   </div>
                 )}
                 {exp.notes && <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>{exp.notes}</div>}
+                {/* NEW: show pay type and charge to if set */}
+                {(exp.payType || exp.chargeTo) && (
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 3 }}>
+                    {exp.payType && <Badge color="#45B7D1">{exp.payType}</Badge>}
+                    {exp.chargeTo && <Badge color="#9B7AEA">→ {exp.chargeTo}</Badge>}
+                  </div>
+                )}
               </div>
 
               <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
@@ -1143,6 +1175,26 @@ function ExpenseTracker({ state, update }) {
         </div>
 
         <Input label="Notes (optional)" value={form.notes} onChange={v => setForm(f => ({ ...f, notes: v }))} placeholder="Any extra notes..." />
+
+        {/* NEW: Pay Type field */}
+        <Select label="Pay Type" value={form.payType || "Auto Payment"} onChange={v => setForm(f => ({ ...f, payType: v }))}>
+          <option value="Auto Payment">🔄 Auto Payment</option>
+          <option value="Debit">💳 Debit</option>
+          <option value="Credit">💳 Credit</option>
+          <option value="Cash">💵 Cash</option>
+          <option value="E-Transfer">📱 E-Transfer</option>
+          <option value="Bank Transfer">🏦 Bank Transfer</option>
+          <option value="Other">⚙️ Other</option>
+        </Select>
+
+        {/* NEW: Charge To field — pulls from saved cards */}
+        <Select label="Charge To / Payment Source" value={form.chargeTo || ""} onChange={v => setForm(f => ({ ...f, chargeTo: v }))}>
+          <option value="">— Select source —</option>
+          <option value="Chequing">🏦 Chequing Account</option>
+          <option value="Savings">💰 Savings Account</option>
+          {state.cards.map(c => <option key={c.id} value={c.label}>💳 {c.label}</option>)}
+        </Select>
+
         <button onClick={saveExp} style={{ width: "100%", padding: "14px", borderRadius: 14, border: "none", background: "var(--gradient)", color: "#fff", fontSize: 16, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
           {editId ? "Save Changes ✓" : "Add Expense 🌸"}
         </button>
@@ -1241,15 +1293,45 @@ function DebtCrusher({ state, update }) {
 }
 
 // ─── CREDIT CARDS ─────────────────────────────────────────────────────────────
+// UPDATED: Full payment recording, history, and balance reduction
 function CreditCards({ state, update }) {
   const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm] = useState({ label: "", limit: 0, balance: 0, statementDay: 1, dueDay: 15, apr: 19.99, minPayment: 25 });
+  const [payModal, setPayModal] = useState(null); // card id being paid
+  const [payAmt, setPayAmt] = useState("");
+  const [payNote, setPayNote] = useState("");
+  const [form, setForm] = useState({ label: "", limit: 0, balance: 0, statementDay: 1, dueDay: 15, apr: 19.99, minPayment: 25, owner: "Zai" });
 
   function addCard() {
-    update({ cards: [...state.cards, { ...form, id: Date.now(), limit: parseFloat(form.limit), balance: parseFloat(form.balance), apr: parseFloat(form.apr), minPayment: parseFloat(form.minPayment) }] });
+    update({ cards: [...state.cards, { ...form, id: Date.now(), limit: parseFloat(form.limit), balance: parseFloat(form.balance), apr: parseFloat(form.apr), minPayment: parseFloat(form.minPayment), payments: [] }] });
     setShowAdd(false);
+    setForm({ label: "", limit: 0, balance: 0, statementDay: 1, dueDay: 15, apr: 19.99, minPayment: 25, owner: "Zai" });
   }
+
   function removeCard(id) { update({ cards: state.cards.filter(c => c.id !== id) }); }
+
+  // FIXED: Record payment — reduces balance and saves to history
+  function recordPayment() {
+    const amt = parseFloat(payAmt);
+    if (!amt || amt <= 0) return;
+    update({
+      cards: state.cards.map(c => {
+        if (c.id !== payModal) return c;
+        const newBalance = Math.max(0, c.balance - amt);
+        const payments = c.payments || [];
+        return {
+          ...c,
+          balance: parseFloat(newBalance.toFixed(2)),
+          payments: [{ id: Date.now(), amount: amt, date: today, note: payNote }, ...payments],
+        };
+      })
+    });
+    setPayModal(null); setPayAmt(""); setPayNote("");
+  }
+
+  const totalBalance = state.cards.reduce((s, c) => s + c.balance, 0);
+  const totalLimit = state.cards.reduce((s, c) => s + c.limit, 0);
+  const totalUtil = totalLimit > 0 ? Math.round((totalBalance / totalLimit) * 100) : 0;
+  const todayDay = new Date().getDate();
 
   return (
     <div>
@@ -1260,67 +1342,161 @@ function CreditCards({ state, update }) {
         </button>
       </div>
 
-      {state.cards.map(card => {
-        const util = Math.round((card.balance / card.limit) * 100);
+      {/* Summary hero */}
+      {state.cards.length > 0 && (
+        <Card style={{ background: "var(--gradient)", border: "none", marginBottom: 16 }}>
+          <div style={{ color: "rgba(255,255,255,0.7)", fontSize: 12, fontWeight: 700 }}>TOTAL OWING</div>
+          <div style={{ color: "#fff", fontSize: 32, fontWeight: 900, marginTop: 2 }}>{fmtD(totalBalance)}</div>
+          <div style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, marginTop: 2 }}>of {fmtD(totalLimit)} total credit · {totalUtil}% used</div>
+          <div style={{ marginTop: 10, height: 6, background: "rgba(255,255,255,0.2)", borderRadius: 3, overflow: "hidden" }}>
+            <div style={{ width: `${Math.min(100, totalUtil)}%`, height: "100%", background: totalUtil >= 70 ? "#FF9999" : totalUtil >= 30 ? "#FFD580" : "#88E0A0", borderRadius: 3, transition: "width 0.5s" }} />
+          </div>
+        </Card>
+      )}
+
+      {state.cards.map((card, idx) => {
+        const util = card.limit > 0 ? Math.round((card.balance / card.limit) * 100) : 0;
         const utilColor = util >= 70 ? "#FF6B6B" : util >= 30 ? "#F4A261" : "#52C97D";
+        const isDueSoon = card.dueDay >= todayDay && card.dueDay - todayDay <= 7;
+        const isOverdue = card.dueDay < todayDay;
+        const cardGrads = [
+          "linear-gradient(135deg, #C24B1A, #7A2808)",
+          "linear-gradient(135deg, #3A6B4E, #1C3A28)",
+          "linear-gradient(135deg, #2860A0, #123060)",
+          "linear-gradient(135deg, #A67C20, #5A4010)",
+        ];
+        const payments = card.payments || [];
+
         return (
-          <Card key={card.id} style={{ marginBottom: 14 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-              <div>
-                <div style={{ fontWeight: 800, fontSize: 17 }}>{card.label}</div>
-                <div style={{ fontSize: 12, color: "var(--muted)" }}>APR {card.apr}% • Min {fmt(card.minPayment)}</div>
+          <div key={card.id} style={{ marginBottom: 18 }}>
+            {/* Visual card — styled like original HTML */}
+            <div style={{ borderRadius: 16, padding: "18px 18px 14px", background: cardGrads[idx % 4], position: "relative", overflow: "hidden", color: "#fff", marginBottom: 10 }}>
+              <div style={{ position: "absolute", bottom: -30, right: -30, width: 110, height: 110, borderRadius: "50%", background: "rgba(255,255,255,0.07)", pointerEvents: "none" }} />
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 15 }}>{card.label}</div>
+                  <div style={{ fontSize: 11, opacity: 0.65, marginTop: 2 }}>{card.owner || "—"}</div>
+                </div>
+                <button onClick={() => removeCard(card.id)} style={{ background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 7, padding: "4px 8px", color: "#fff", cursor: "pointer", fontSize: 12 }}>✕</button>
               </div>
-              <button onClick={() => removeCard(card.id)} style={{ padding: 4, border: "none", background: "transparent", cursor: "pointer" }}>
-                <Icon name="trash" size={14} color="var(--muted)" />
-              </button>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 14 }}>
-              <span>Balance: <strong>{fmt(card.balance)}</strong></span>
-              <span>Limit: <strong>{fmt(card.limit)}</strong></span>
-            </div>
-            <ProgressBar value={card.balance} max={card.limit} color={utilColor} />
-            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 12 }}>
-              <span style={{ color: utilColor, fontWeight: 700 }}>Utilization: {util}% {util >= 70 ? "⚠️ Too high!" : util >= 30 ? "🟡 Moderate" : "✅ Great!"}</span>
-            </div>
-            {util >= 70 && (
-              <div style={{ marginTop: 8, padding: "8px 12px", borderRadius: 10, background: "#FF6B6B22", fontSize: 13, color: "#FF6B6B", fontWeight: 700 }}>
-                ⚠️ High utilization hurts your credit score. Try to pay this below {fmt(card.limit * 0.3)}.
+              <div style={{ fontFamily: "inherit", fontSize: 28, fontWeight: 900, margin: "10px 0 2px" }}>{fmtD(card.balance)}</div>
+              <div style={{ fontSize: 11, opacity: 0.6 }}>of {fmtD(card.limit)} limit · APR {card.apr}%</div>
+              <div style={{ height: 4, background: "rgba(255,255,255,0.2)", borderRadius: 2, overflow: "hidden", margin: "10px 0" }}>
+                <div style={{ width: `${Math.min(100, util)}%`, height: "100%", background: "rgba(255,255,255,0.75)", borderRadius: 2 }} />
               </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => { setPayModal(card.id); setPayAmt(card.minPayment); }}
+                  style={{ flex: 1, background: "rgba(255,255,255,0.18)", border: "1px solid rgba(255,255,255,0.28)", color: "#fff", borderRadius: 8, fontSize: 12, fontFamily: "inherit", fontWeight: 600, padding: "6px 10px", cursor: "pointer" }}>
+                  💳 Make Payment
+                </button>
+                <div style={{ padding: "6px 10px", background: "rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 11, textAlign: "center" }}>
+                  <div style={{ opacity: 0.6 }}>Due Day</div>
+                  <div style={{ fontWeight: 800 }}>{card.dueDay}</div>
+                </div>
+                <div style={{ padding: "6px 10px", background: "rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 11, textAlign: "center" }}>
+                  <div style={{ opacity: 0.6 }}>Min</div>
+                  <div style={{ fontWeight: 800 }}>{fmt(card.minPayment)}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Status and min payment box */}
+            <Card style={{ padding: "12px 14px", marginBottom: 6 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.7 }}>Payment Status</span>
+                <span style={{ fontSize: 12, fontWeight: 800, color: isOverdue ? "#FF6B6B" : isDueSoon ? "#F4A261" : "#52C97D" }}>
+                  {isOverdue ? "⚠️ Overdue" : isDueSoon ? "🔔 Due Soon" : "✅ Upcoming"}
+                </span>
+              </div>
+              {/* Min payment breakdown */}
+              <div style={{ background: "#F4A26115", border: "1px solid #F4A26133", borderRadius: 10, padding: "10px 12px" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#F4A261", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 6 }}>Minimum Payment</div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 3 }}>
+                  <span style={{ color: "var(--muted)" }}>Min Payment</span>
+                  <span style={{ fontWeight: 700 }}>{fmtD(card.minPayment)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 3 }}>
+                  <span style={{ color: "var(--muted)" }}>Utilization</span>
+                  <span style={{ fontWeight: 700, color: utilColor }}>{util}%</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, borderTop: "1px solid #F4A26133", paddingTop: 6, marginTop: 3 }}>
+                  <span style={{ color: "var(--muted)" }}>Available Credit</span>
+                  <span style={{ fontWeight: 800, color: "#52C97D" }}>{fmtD(Math.max(0, card.limit - card.balance))}</span>
+                </div>
+              </div>
+            </Card>
+
+            {/* Payment history */}
+            {payments.length > 0 && (
+              <Card style={{ padding: "12px 14px" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.7, marginBottom: 8 }}>Payment History</div>
+                {payments.slice(0, 5).map(p => (
+                  <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
+                    <div>
+                      <div style={{ fontWeight: 700, color: "#52C97D" }}>−{fmtD(p.amount)}</div>
+                      {p.note && <div style={{ fontSize: 11, color: "var(--muted)" }}>{p.note}</div>}
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--muted)" }}>{p.date}</div>
+                  </div>
+                ))}
+              </Card>
             )}
-            <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
-              <div style={{ flex: 1, padding: "8px 12px", borderRadius: 12, background: "var(--bg)", textAlign: "center" }}>
-                <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>STATEMENT DATE</div>
-                <div style={{ fontSize: 16, fontWeight: 800 }}>Day {card.statementDay}</div>
-              </div>
-              <div style={{ flex: 1, padding: "8px 12px", borderRadius: 12, background: "var(--bg)", textAlign: "center" }}>
-                <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>PAYMENT DUE</div>
-                <div style={{ fontSize: 16, fontWeight: 800 }}>Day {card.dueDay}</div>
-              </div>
-            </div>
-          </Card>
+          </div>
         );
       })}
 
       {/* Utilization chart */}
-      {state.cards.length > 0 && (
+      {state.cards.length > 1 && (
         <Card>
-          <div style={{ fontWeight: 800, marginBottom: 12 }}>Credit Utilization Overview</div>
-          <ResponsiveContainer width="100%" height={140}>
-            <BarChart data={state.cards.map(c => ({ name: c.label.split(" ")[0], util: Math.round((c.balance / c.limit) * 100) }))}>
+          <div style={{ fontWeight: 800, marginBottom: 12 }}>Utilization Overview</div>
+          <ResponsiveContainer width="100%" height={130}>
+            <BarChart data={state.cards.map(c => ({ name: c.label.split(" ")[0], util: c.limit > 0 ? Math.round((c.balance / c.limit) * 100) : 0 }))}>
               <XAxis dataKey="name" tick={{ fontSize: 11 }} />
               <YAxis tickFormatter={v => `${v}%`} tick={{ fontSize: 11 }} domain={[0, 100]} />
               <Tooltip formatter={v => `${v}%`} />
               <Bar dataKey="util" name="Utilization %" radius={[8, 8, 0, 0]}>
-                {state.cards.map((c, i) => <Cell key={i} fill={Math.round((c.balance / c.limit) * 100) >= 70 ? "#FF6B6B" : "#52C97D"} />)}
+                {state.cards.map((c, i) => <Cell key={i} fill={c.limit > 0 && (c.balance / c.limit) >= 0.7 ? "#FF6B6B" : "#52C97D"} />)}
               </Bar>
             </BarChart>
           </ResponsiveContainer>
-          <div style={{ marginTop: 10, fontSize: 13, color: "var(--muted)" }}>💡 Keep utilization below 30% for a healthy credit score</div>
+          <div style={{ marginTop: 8, fontSize: 12, color: "var(--muted)" }}>💡 Keep under 30% for a healthy credit score</div>
         </Card>
       )}
 
-      <Modal open={showAdd} onClose={() => setShowAdd(false)} title="Add Credit Card">
+      {/* FIXED: Payment modal */}
+      <Modal open={!!payModal} onClose={() => { setPayModal(null); setPayAmt(""); setPayNote(""); }} title="Record Payment 💳">
+        {payModal && (() => {
+          const card = state.cards.find(c => c.id === payModal);
+          if (!card) return null;
+          const newBal = Math.max(0, card.balance - parseFloat(payAmt || 0));
+          return (
+            <>
+              <div style={{ padding: "12px 14px", borderRadius: 12, background: "var(--bg)", marginBottom: 14 }}>
+                <div style={{ fontSize: 14, fontWeight: 800 }}>{card.label}</div>
+                <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 2 }}>Current balance: {fmtD(card.balance)}</div>
+              </div>
+              <Input label="Payment Amount ($)" value={payAmt} onChange={setPayAmt} type="number" placeholder="0.00" />
+              <Input label="Note (optional)" value={payNote} onChange={setPayNote} placeholder="e.g. Minimum payment, Full payment..." />
+              {parseFloat(payAmt) > 0 && (
+                <div style={{ padding: "10px 14px", borderRadius: 12, background: "#52C97D15", border: "1px solid #52C97D33", marginBottom: 12, fontSize: 13 }}>
+                  <div style={{ color: "var(--muted)" }}>Balance after payment:</div>
+                  <div style={{ fontSize: 18, fontWeight: 900, color: "#52C97D", marginTop: 2 }}>{fmtD(newBal)}</div>
+                </div>
+              )}
+              <button onClick={recordPayment} style={{ width: "100%", padding: "14px", borderRadius: 14, border: "none", background: "var(--gradient)", color: "#fff", fontSize: 16, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>✓ Record Payment</button>
+            </>
+          );
+        })()}
+      </Modal>
+
+      {/* Add card modal */}
+      <Modal open={showAdd} onClose={() => setShowAdd(false)} title="Add Credit Card 💳">
         <Input label="Card Name" value={form.label} onChange={v => setForm(f => ({ ...f, label: v }))} placeholder="e.g. RBC Avion Visa" />
+        <Select label="Owner" value={form.owner || "Zai"} onChange={v => setForm(f => ({ ...f, owner: v }))}>
+          <option value="Zai">Zai</option>
+          <option value="Ariel">Ariel</option>
+          <option value="Joint">Joint</option>
+        </Select>
         <Input label="Credit Limit ($)" value={form.limit} onChange={v => setForm(f => ({ ...f, limit: v }))} type="number" />
         <Input label="Current Balance ($)" value={form.balance} onChange={v => setForm(f => ({ ...f, balance: v }))} type="number" />
         <Input label="APR (%)" value={form.apr} onChange={v => setForm(f => ({ ...f, apr: v }))} type="number" />
@@ -1975,17 +2151,654 @@ function Settings({ state, update }) {
   );
 }
 
+// ─── BIWEEKLY PAYDAY PLANNER ─────────────────────────────────────────────────
+// NEW: Full payday planner with expense assignment per paycheck period
+function PaydayPlanner({ state, update }) {
+  const [selectedPayday, setSelectedPayday] = useState(null);
+
+  // Generate next 6 biweekly paydays from each income source
+  function getPaydays() {
+    const paydays = [];
+    state.incomes.forEach(inc => {
+      if (!inc.nextDate) return;
+      const start = new Date(inc.nextDate + "T12:00:00");
+      for (let i = 0; i < 6; i++) {
+        const d = new Date(start);
+        const step = inc.frequency === "weekly" ? 7 : inc.frequency === "biweekly" ? 14 : 30;
+        d.setDate(d.getDate() + step * i);
+        const dateStr = d.toISOString().split("T")[0];
+        const endDate = new Date(d);
+        endDate.setDate(d.getDate() + step - 1);
+        const endStr = endDate.toISOString().split("T")[0];
+
+        let grossAmt, netAmt;
+        if (inc.type === "shift") {
+          const { grossPerPeriod, netPay } = computeShiftPay(inc.hourlyRate, inc.hoursPerWeek, inc.frequency);
+          grossAmt = grossPerPeriod;
+          netAmt = netPay;
+        } else {
+          grossAmt = inc.amount;
+          netAmt = inc.amount;
+        }
+
+        paydays.push({ id: `${inc.id}-${dateStr}`, incomeId: inc.id, incomeLabel: inc.label, color: inc.color, date: dateStr, endDate: endStr, gross: grossAmt, net: netAmt, frequency: inc.frequency });
+      }
+    });
+    return paydays.sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  // Assign expenses to a payday period
+  function getExpensesForPeriod(startDate, endDate) {
+    const start = new Date(startDate + "T00:00:00");
+    const end = new Date(endDate + "T23:59:59");
+    const todayD = new Date(today + "T00:00:00");
+
+    return state.expenses.filter(exp => {
+      if (!exp.dueDay) return false;
+      // Check if the due day falls within this period
+      const dStart = new Date(start);
+      while (dStart <= end) {
+        if (dStart.getDate() === exp.dueDay) return true;
+        dStart.setDate(dStart.getDate() + 1);
+      }
+      return false;
+    });
+  }
+
+  const paydays = getPaydays();
+  const todayPayday = paydays.find(p => p.date <= today && p.endDate >= today) || paydays[0];
+
+  function statusColor(exp, periodStart) {
+    if (exp.paid) return "#52C97D";
+    const dueDate = new Date(periodStart.slice(0, 7) + "-" + String(exp.dueDay).padStart(2, "0") + "T00:00:00");
+    const now = new Date();
+    if (dueDate < now) return "#FF6B6B";
+    const diff = (dueDate - now) / 86400000;
+    if (diff <= 5) return "#F4A261";
+    return "var(--muted)";
+  }
+
+  function statusLabel(exp, periodStart) {
+    if (exp.paid) return "✅ Paid";
+    const dueDate = new Date(periodStart.slice(0, 7) + "-" + String(exp.dueDay).padStart(2, "0") + "T00:00:00");
+    const now = new Date();
+    if (dueDate < now) return "⚠️ Overdue";
+    const diff = (dueDate - now) / 86400000;
+    if (diff <= 5) return "🔔 Due soon";
+    return "📅 Upcoming";
+  }
+
+  const active = selectedPayday || todayPayday;
+
+  // Dashboard-style alert counts
+  const overdueCount = state.expenses.filter(e => {
+    if (e.paid || !e.dueDay) return false;
+    return e.dueDay < new Date().getDate();
+  }).length;
+  const upcomingCount = state.expenses.filter(e => {
+    if (e.paid || !e.dueDay) return false;
+    const diff = e.dueDay - new Date().getDate();
+    return diff >= 0 && diff <= 7;
+  }).length;
+
+  return (
+    <div>
+      <div style={{ marginBottom: 20 }}>
+        <h2 style={{ margin: "0 0 4px", fontSize: 22, fontWeight: 900 }}>📅 Payday Planner</h2>
+        <p style={{ margin: 0, color: "var(--muted)", fontSize: 13 }}>Organize your bills by paycheck period</p>
+      </div>
+
+      {/* NEW: Alert indicators */}
+      {(overdueCount > 0 || upcomingCount > 0) && (
+        <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+          {overdueCount > 0 && (
+            <div style={{ flex: 1, padding: "10px 14px", borderRadius: 14, background: "#FF6B6B22", border: "1.5px solid #FF6B6B55" }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: "#FF6B6B" }}>⚠️ {overdueCount} overdue</div>
+            </div>
+          )}
+          {upcomingCount > 0 && (
+            <div style={{ flex: 1, padding: "10px 14px", borderRadius: 14, background: "#F4A26122", border: "1.5px solid #F4A26155" }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: "#F4A261" }}>🔔 {upcomingCount} due this week</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Payday selector — horizontal scroll */}
+      <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 8, marginBottom: 16, WebkitOverflowScrolling: "touch" }}>
+        {paydays.map(p => (
+          <button key={p.id} onClick={() => setSelectedPayday(p)}
+            style={{ flexShrink: 0, padding: "10px 14px", borderRadius: 14, border: `2px solid ${active?.id === p.id ? p.color : "var(--border)"}`, background: active?.id === p.id ? p.color + "22" : "var(--card)", cursor: "pointer", textAlign: "left", fontFamily: "inherit", minWidth: 120 }}>
+            <div style={{ fontSize: 10, color: p.color, fontWeight: 800, textTransform: "uppercase" }}>{p.incomeLabel.split(" ")[0]}</div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", marginTop: 2 }}>{p.date.slice(5)}</div>
+            <div style={{ fontSize: 11, color: "var(--muted)" }}>{fmt(p.net)}</div>
+          </button>
+        ))}
+      </div>
+
+      {/* Active payday detail */}
+      {active && (() => {
+        const expenses = getExpensesForPeriod(active.date, active.endDate);
+        const totalDue = expenses.reduce((s, e) => s + e.amount, 0);
+        const totalPaidAmt = expenses.filter(e => e.paid).reduce((s, e) => s + e.amount, 0);
+        const remaining = active.net - totalDue;
+
+        return (
+          <div>
+            {/* Hero card */}
+            <Card style={{ background: "var(--gradient)", border: "none", marginBottom: 16 }}>
+              <div style={{ color: "rgba(255,255,255,0.8)", fontSize: 12, fontWeight: 700 }}>{active.incomeLabel}</div>
+              <div style={{ color: "#fff", fontSize: 28, fontWeight: 900, marginTop: 2 }}>Payday {active.date}</div>
+              <div style={{ color: "rgba(255,255,255,0.7)", fontSize: 12, marginTop: 2 }}>Period: {active.date} → {active.endDate}</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 14 }}>
+                {[["Net Pay", fmt(active.net), "#fff"], ["Bills Due", fmt(totalDue), "#FFB3D1"], ["Left Over", fmt(remaining), remaining >= 0 ? "#88E0A0" : "#FF9999"]].map(([l, v, c]) => (
+                  <div key={l} style={{ textAlign: "center", padding: "8px", borderRadius: 10, background: "rgba(255,255,255,0.15)" }}>
+                    <div style={{ fontSize: 10, color: "rgba(255,255,255,0.7)", fontWeight: 700 }}>{l}</div>
+                    <div style={{ fontSize: 15, fontWeight: 900, color: c, marginTop: 2 }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+
+            {/* Payment progress */}
+            <Card style={{ marginBottom: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                <span style={{ fontWeight: 800, fontSize: 14 }}>Payment Progress</span>
+                <span style={{ fontSize: 13, color: "#52C97D", fontWeight: 700 }}>{fmt(totalPaidAmt)} / {fmt(totalDue)}</span>
+              </div>
+              <ProgressBar value={totalPaidAmt} max={Math.max(totalDue, 1)} color="#52C97D" />
+            </Card>
+
+            {/* Expenses for this period */}
+            {expenses.length === 0 ? (
+              <Card>
+                <div style={{ textAlign: "center", padding: "20px 0", color: "var(--muted)", fontSize: 14 }}>
+                  🌸 No bills with due dates fall in this period.<br />
+                  <span style={{ fontSize: 12 }}>Add a due day to your expenses to see them here.</span>
+                </div>
+              </Card>
+            ) : (
+              expenses.map(exp => {
+                const sc = statusColor(exp, active.date);
+                const sl = statusLabel(exp, active.date);
+                return (
+                  <Card key={exp.id} style={{ marginBottom: 10, borderColor: exp.paid ? "#52C97D33" : sc + "44" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <button onClick={() => update({ expenses: state.expenses.map(e => e.id === exp.id ? { ...e, paid: !e.paid } : e) })}
+                        style={{ width: 28, height: 28, borderRadius: 9, border: `2px solid ${exp.paid ? "#52C97D" : sc}`, background: exp.paid ? "#52C97D" : "transparent", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: 0 }}>
+                        {exp.paid && <Icon name="check" size={15} color="#fff" />}
+                      </button>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 700, fontSize: 15, textDecoration: exp.paid ? "line-through" : "none", color: exp.paid ? "var(--muted)" : "var(--text)" }}>{exp.label}</div>
+                        <div style={{ fontSize: 12, color: sc, fontWeight: 700, marginTop: 2 }}>{sl} · Day {exp.dueDay}</div>
+                      </div>
+                      <span style={{ fontWeight: 900, fontSize: 16, color: exp.paid ? "#52C97D" : sc }}>{fmt(exp.amount)}</span>
+                    </div>
+                  </Card>
+                );
+              })
+            )}
+
+            {/* Remaining balance summary */}
+            <Card style={{ background: remaining >= 0 ? "#52C97D15" : "#FF6B6B15", border: `1.5px solid ${remaining >= 0 ? "#52C97D44" : "#FF6B6B44"}` }}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: remaining >= 0 ? "#52C97D" : "#FF6B6B" }}>
+                {remaining >= 0 ? `✅ ${fmt(remaining)} remaining this payday` : `⚠️ Over budget by ${fmt(Math.abs(remaining))}`}
+              </div>
+              <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>After all bills for this period</div>
+            </Card>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+// ─── MONTHLY OVERVIEW — UPDATED: HTML-style payday planner with carryover ────
+function MonthlyOverview({ state, update }) {
+  const todayD = new Date();
+  const currentYear = todayD.getFullYear();
+  const currentMonth = todayD.getMonth();
+  const [monthOffset, setMonthOffset] = useState(0);
+  const [carryoverEnabled, setCarryoverEnabled] = useState(state.carryoverEnabled ?? true);
+  const [carryoverAmt, setCarryoverAmt] = useState(state.carryoverAmt ?? 0);
+  const [editCarryover, setEditCarryover] = useState(false);
+  const [tmpCarryover, setTmpCarryover] = useState("");
+
+  const viewDate = new Date(currentYear, currentMonth + monthOffset, 1);
+  const viewYear = viewDate.getFullYear();
+  const viewMonth = viewDate.getMonth();
+  const monthLabel = viewDate.toLocaleDateString("en-CA", { month: "long", year: "numeric" });
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+
+  // UPDATED: Save carryover to state when toggled/changed
+  function toggleCarryover() {
+    const next = !carryoverEnabled;
+    setCarryoverEnabled(next);
+    update({ carryoverEnabled: next });
+  }
+  function saveCarryover() {
+    const amt = parseFloat(tmpCarryover) || 0;
+    setCarryoverAmt(amt);
+    update({ carryoverAmt: amt });
+    setEditCarryover(false);
+  }
+
+  // Split month into two periods: 1–15 and 16–end
+  const period1 = { label: `${monthLabel.split(" ")[0]} 1–15`, start: 1, end: 15 };
+  const period2 = { label: `${monthLabel.split(" ")[0]} 16–${daysInMonth}`, start: 16, end: daysInMonth };
+
+  // Get income for each period (biweekly = one per period, monthly = all in period 2)
+  function getIncomeForPeriod(start, end) {
+    let total = 0;
+    state.incomes.forEach(inc => {
+      if (!inc.nextDate) return;
+      const payDay = parseInt(inc.nextDate.slice(8));
+      if (inc.frequency === "monthly" && payDay >= start && payDay <= end) {
+        const { grossPerPeriod } = computeShiftPay(inc.hourlyRate || 0, inc.hoursPerWeek || 0, "monthly");
+        total += inc.type === "shift" ? grossPerPeriod : (inc.amount || 0);
+      } else if ((inc.frequency === "biweekly" || inc.frequency === "weekly") && payDay >= start && payDay <= end) {
+        const { grossPerPeriod } = computeShiftPay(inc.hourlyRate || 0, inc.hoursPerWeek || 0, inc.frequency);
+        total += inc.type === "shift" ? grossPerPeriod : (inc.amount || 0);
+      }
+    });
+    // Fallback: split monthly income evenly
+    if (total === 0) {
+      const monthly = monthlyIncome(state.incomes);
+      total = monthly / 2;
+    }
+    return total;
+  }
+
+  // Get expenses due in each period by dueDay
+  function getExpensesForPeriod(start, end) {
+    return state.expenses.filter(e => e.dueDay && e.dueDay >= start && e.dueDay <= end);
+  }
+
+  // Also include card minimums and installments as expenses
+  function getFixedForPeriod(start, end) {
+    const exps = getExpensesForPeriod(start, end);
+    const cardExps = state.cards.filter(c => c.dueDay >= start && c.dueDay <= end).map(c => ({
+      id: `card-${c.id}`, label: `${c.label} (min)`, amount: c.minPayment, dueDay: c.dueDay, paid: false, isCard: true, category: "Credit"
+    }));
+    const instExps = state.installments.filter(i => {
+      const d = new Date(i.startDate + "T12:00:00").getDate();
+      return d >= start && d <= end;
+    }).map(i => ({
+      id: `inst-${i.id}`, label: `${i.label} (installment)`, amount: i.monthly, dueDay: new Date(i.startDate + "T12:00:00").getDate(), paid: false, isInst: true, category: "Installment"
+    }));
+    return [...exps, ...cardExps, ...instExps].sort((a, b) => (a.dueDay || 0) - (b.dueDay || 0));
+  }
+
+  function togglePaid(expId) {
+    update({ expenses: state.expenses.map(e => e.id === expId ? { ...e, paid: !e.paid } : e) });
+  }
+
+  function expStatus(exp) {
+    if (exp.paid) return { color: "#52C97D", label: "Paid" };
+    const dayNum = new Date().getDate();
+    const isCurrentMonth = viewMonth === currentMonth && viewYear === currentYear;
+    if (!isCurrentMonth) return { color: "var(--muted)", label: "Upcoming" };
+    if ((exp.dueDay || 0) < dayNum) return { color: "#FF6B6B", label: "Overdue" };
+    if ((exp.dueDay || 0) - dayNum <= 3) return { color: "#F4A261", label: "Due Soon" };
+    return { color: "#9B7AEA", label: "Upcoming" };
+  }
+
+  // Calculate period 1 remaining for carryover into period 2
+  const p1income = getIncomeForPeriod(period1.start, period1.end);
+  const p1expenses = getFixedForPeriod(period1.start, period1.end);
+  const p1total = p1expenses.reduce((s, e) => s + (e.amount || 0), 0);
+  const p1carryIn = carryoverEnabled ? carryoverAmt : 0;
+  const p1remaining = p1income + p1carryIn - p1total;
+
+  // Summary totals
+  const allExp = [...getFixedForPeriod(1, 15), ...getFixedForPeriod(16, daysInMonth)];
+  const totalDue = allExp.reduce((s, e) => s + (e.amount || 0), 0);
+  const totalPaidAmt = allExp.filter(e => e.paid).reduce((s, e) => s + (e.amount || 0), 0);
+
+  return (
+    <div>
+      {/* Header + month nav */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+        <button onClick={() => setMonthOffset(o => o - 1)} style={{ width: 36, height: 36, borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--card)", cursor: "pointer", fontWeight: 800, fontSize: 16, color: "var(--muted)" }}>‹</button>
+        <div style={{ flex: 1, textAlign: "center", fontWeight: 800, fontSize: 16, background: "var(--card)", border: "1.5px solid var(--border)", borderRadius: 10, padding: "7px 10px" }}>{monthLabel}</div>
+        <button onClick={() => setMonthOffset(o => o + 1)} style={{ width: 36, height: 36, borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--card)", cursor: "pointer", fontWeight: 800, fontSize: 16, color: "var(--muted)" }}>›</button>
+      </div>
+
+      {/* Legend */}
+      <Card style={{ padding: "10px 14px", marginBottom: 14 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, fontSize: 12, fontWeight: 600 }}>
+          {[["#FF6B6B", "Overdue"], ["#F4A261", "Due Soon (≤3 days)"], ["#52C97D", "Paid"], ["#9B7AEA", "Upcoming"]].map(([c, l]) => (
+            <span key={l} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: c, display: "inline-block" }} />
+              <span style={{ color: "var(--muted)" }}>{l}</span>
+            </span>
+          ))}
+        </div>
+      </Card>
+
+      {/* Summary 4-stat grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+        {[
+          ["Total Due", fmtD(totalDue), "var(--accent)"],
+          ["Paid", fmtD(totalPaidAmt), "#52C97D"],
+          ["Still Owed", fmtD(totalDue - totalPaidAmt), "#F4A261"],
+          ["Overdue", String(allExp.filter(e => !e.paid && (e.dueDay || 0) < new Date().getDate() && viewMonth === currentMonth).length), "#FF6B6B"],
+        ].map(([l, v, c]) => (
+          <Card key={l} style={{ textAlign: "center", padding: "12px", marginBottom: 0 }}>
+            <div style={{ fontSize: 18, fontWeight: 900, color: c }}>{v}</div>
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>{l}</div>
+          </Card>
+        ))}
+      </div>
+
+      {/* Carryover control */}
+      <Card style={{ padding: "12px 16px", marginBottom: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#52C97D", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 2 }}>Carryover</div>
+            <div style={{ fontSize: 20, fontWeight: 900, color: "#52C97D" }}>{fmtD(carryoverAmt)}</div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button onClick={() => { setTmpCarryover(String(carryoverAmt)); setEditCarryover(true); }}
+              style={{ fontSize: 12, padding: "4px 10px", borderRadius: 8, border: "1.5px solid #52C97D44", background: "#52C97D15", color: "#52C97D", cursor: "pointer", fontWeight: 700, fontFamily: "inherit" }}>Edit</button>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#52C97D" }}>
+              <button onClick={toggleCarryover}
+                style={{ width: 36, height: 20, borderRadius: 10, border: "none", background: carryoverEnabled ? "#52C97D" : "var(--border)", cursor: "pointer", position: "relative", transition: "background 0.2s" }}>
+                <div style={{ width: 14, height: 14, borderRadius: "50%", background: "#fff", position: "absolute", top: 3, left: carryoverEnabled ? 19 : 3, transition: "left 0.2s" }} />
+              </button>
+              <span style={{ fontWeight: 600 }}>{carryoverEnabled ? "On" : "Off"}</span>
+            </div>
+          </div>
+        </div>
+        {editCarryover && (
+          <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
+            <input value={tmpCarryover} onChange={e => setTmpCarryover(e.target.value)} type="number" placeholder="0.00"
+              style={{ flex: 1, padding: "8px 12px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--bg)", fontFamily: "inherit", fontSize: 14, color: "var(--text)" }} />
+            <button onClick={saveCarryover} style={{ padding: "8px 16px", borderRadius: 10, border: "none", background: "#52C97D", color: "#fff", fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Save</button>
+            <button onClick={() => setEditCarryover(false)} style={{ padding: "8px 12px", borderRadius: 10, border: "1.5px solid var(--border)", background: "transparent", color: "var(--muted)", cursor: "pointer", fontFamily: "inherit" }}>✕</button>
+          </div>
+        )}
+      </Card>
+
+      {/* Period 1: 1–15 */}
+      <PeriodBlock
+        period={period1}
+        income={p1income}
+        expenses={getFixedForPeriod(1, 15)}
+        carryIn={carryoverEnabled ? carryoverAmt : 0}
+        carryoverEnabled={carryoverEnabled}
+        togglePaid={togglePaid}
+        viewMonth={viewMonth}
+        currentMonth={currentMonth}
+      />
+
+      {/* Period 2: 16–end */}
+      <PeriodBlock
+        period={period2}
+        income={getIncomeForPeriod(16, daysInMonth)}
+        expenses={getFixedForPeriod(16, daysInMonth)}
+        carryIn={carryoverEnabled ? Math.max(0, p1remaining) : 0}
+        carryoverEnabled={carryoverEnabled}
+        togglePaid={togglePaid}
+        viewMonth={viewMonth}
+        currentMonth={currentMonth}
+      />
+    </div>
+  );
+}
+
+// NEW: Extracted period block component for clean reuse
+function PeriodBlock({ period, income, expenses, carryIn, carryoverEnabled, togglePaid, viewMonth, currentMonth }) {
+  const totalDue = expenses.reduce((s, e) => s + (e.amount || 0), 0);
+  const paidAmt = expenses.filter(e => e.paid).reduce((s, e) => s + (e.amount || 0), 0);
+  const available = income + carryIn;
+  const remaining = available - totalDue;
+  const isNegative = remaining < 0;
+  const todayDay = new Date().getDate();
+  const isCurrentMonth = viewMonth === currentMonth;
+
+  function expStatus(exp) {
+    if (exp.paid) return { color: "#52C97D", label: "Paid" };
+    if (!isCurrentMonth) return { color: "var(--muted)", label: "Upcoming" };
+    if ((exp.dueDay || 0) < todayDay) return { color: "#FF6B6B", label: "Overdue" };
+    if ((exp.dueDay || 0) - todayDay <= 3) return { color: "#F4A261", label: "Due soon" };
+    return { color: "#9B7AEA", label: "Upcoming" };
+  }
+
+  return (
+    <div style={{ marginBottom: 24 }}>
+      {/* Period divider */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0 12px" }}>
+        <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+        <span style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 1, whiteSpace: "nowrap" }}>{period.label}</span>
+        <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+      </div>
+
+      {/* Carryover badge */}
+      {carryoverEnabled && carryIn > 0 && (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 14px", background: "#52C97D15", border: "1px solid #52C97D33", borderRadius: 10, marginBottom: 10 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#52C97D", textTransform: "uppercase", letterSpacing: 0.6 }}>Carried in from prev period</div>
+          <div style={{ fontSize: 16, fontWeight: 900, color: "#52C97D" }}>+{fmtD(carryIn)}</div>
+        </div>
+      )}
+
+      {/* Summary calc box */}
+      <Card style={{ padding: "14px 16px", marginBottom: 10 }}>
+        <div style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 5 }}>
+            <span style={{ color: "var(--muted)" }}>Income this period</span>
+            <span style={{ fontWeight: 700 }}>{fmtD(income)}</span>
+          </div>
+          {carryoverEnabled && carryIn > 0 && (
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 5 }}>
+              <span style={{ color: "var(--muted)" }}>+ Carryover</span>
+              <span style={{ fontWeight: 700, color: "#52C97D" }}>{fmtD(carryIn)}</span>
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 5 }}>
+            <span style={{ color: "var(--muted)" }}>− Total bills</span>
+            <span style={{ fontWeight: 700, color: "#FF6B6B" }}>{fmtD(totalDue)}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 15, paddingTop: 8, borderTop: "1px solid var(--border)", fontWeight: 900 }}>
+            <span>Remaining</span>
+            <span style={{ color: isNegative ? "#FF6B6B" : "#52C97D" }}>{fmtD(remaining)}</span>
+          </div>
+        </div>
+        <ProgressBar value={paidAmt} max={Math.max(totalDue, 1)} color="#52C97D" label={`${fmtD(paidAmt)} paid of ${fmtD(totalDue)}`} />
+      </Card>
+
+      {/* Expense rows */}
+      {expenses.length === 0 ? (
+        <div style={{ padding: "12px 0", color: "var(--muted)", fontSize: 13, textAlign: "center" }}>No bills in this period</div>
+      ) : (
+        <Card style={{ padding: "4px 16px" }}>
+          {expenses.map(exp => {
+            const st = expStatus(exp);
+            const isEditable = !exp.isCard && !exp.isInst;
+            return (
+              <div key={exp.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: "1px solid var(--border)", opacity: exp.paid ? 0.5 : 1 }}>
+                {isEditable ? (
+                  <button onClick={() => togglePaid(exp.id)}
+                    style={{ width: 18, height: 18, borderRadius: 5, border: `2px solid ${exp.paid ? "#52C97D" : st.color}`, background: exp.paid ? "#52C97D" : "transparent", cursor: "pointer", flexShrink: 0, padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    {exp.paid && <Icon name="check" size={11} color="#fff" />}
+                  </button>
+                ) : (
+                  <div style={{ width: 18, height: 18, borderRadius: 5, background: "var(--border)", flexShrink: 0 }} />
+                )}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, textDecoration: exp.paid ? "line-through" : "none" }}>{exp.label}</div>
+                  <div style={{ fontSize: 11, color: st.color, fontWeight: 700, marginTop: 1 }}>
+                    Day {exp.dueDay} · {st.label}
+                    {exp.isCard && <span style={{ marginLeft: 5, fontSize: 10, background: "#45B7D115", color: "#45B7D1", padding: "1px 5px", borderRadius: 4, fontWeight: 700 }}>CC</span>}
+                    {exp.isInst && <span style={{ marginLeft: 5, fontSize: 10, background: "#9B7AEA15", color: "#9B7AEA", padding: "1px 5px", borderRadius: 4, fontWeight: 700 }}>INST</span>}
+                  </div>
+                </div>
+                <div style={{ fontSize: 14, fontWeight: 800, flexShrink: 0 }}>{fmtD(exp.amount)}</div>
+              </div>
+            );
+          })}
+        </Card>
+      )}
+
+      {/* Remaining summary */}
+      <div style={{ padding: "10px 14px", borderRadius: 12, background: isNegative ? "#FF6B6B15" : "#52C97D15", border: `1px solid ${isNegative ? "#FF6B6B33" : "#52C97D33"}`, marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: isNegative ? "#FF6B6B" : "#52C97D", textTransform: "uppercase", letterSpacing: 0.6 }}>
+            {isNegative ? "⚠️ Over budget by" : carryoverEnabled ? "✅ Carries to next period" : "✅ Left over"}
+          </div>
+          <div style={{ fontSize: 20, fontWeight: 900, color: isNegative ? "#FF6B6B" : "#52C97D" }}>{fmtD(Math.abs(remaining))}</div>
+        </div>
+        {!isNegative && carryoverEnabled && <span style={{ fontSize: 18, color: "#52C97D" }}>→</span>}
+      </div>
+    </div>
+  );
+}
+
+// ─── YTD TRACKER ────────────────────────────────────────────────────────────
+// NEW: Year-to-date earnings summary
+function YTDTracker({ state }) {
+  const currentMonth = new Date().getMonth(); // 0-indexed
+  const currentYear = new Date().getFullYear();
+
+  // Calculate YTD from all shift logs + received payments
+  let ytdGross = 0, ytdHours = 0;
+  state.incomes.forEach(inc => {
+    const shifts = (inc.dailyShifts || []).filter(s => {
+      const y = parseInt(s.date.slice(0, 4));
+      return y === currentYear && s.worked;
+    });
+    shifts.forEach(s => {
+      ytdGross += s.gross;
+      ytdHours += s.hoursWorked;
+    });
+    // Also count received payments
+    const received = (inc.received || []).filter(r => parseInt(r.date.slice(0, 4)) === currentYear);
+    received.forEach(r => { if (!inc.dailyShifts?.length) ytdGross += r.amount; });
+  });
+
+  // Estimated YTD based on income projections
+  const monthlyNet = monthlyIncome(state.incomes);
+  const estimatedYTDNet = monthlyNet * (currentMonth + 1);
+  const estimatedYTDGross = estimatedYTDNet * 1.25; // rough gross estimate
+
+  // Per-income YTD
+  function incomeYTD(inc) {
+    const shifts = (inc.dailyShifts || []).filter(s => parseInt(s.date.slice(0, 4)) === currentYear && s.worked);
+    const received = (inc.received || []).filter(r => parseInt(r.date.slice(0, 4)) === currentYear);
+    const shiftGross = shifts.reduce((s, sh) => s + sh.gross, 0);
+    const shiftHours = shifts.reduce((s, sh) => s + sh.hoursWorked, 0);
+    const receivedAmt = received.reduce((s, r) => s + r.amount, 0);
+    return { gross: shiftGross, hours: shiftHours, received: receivedAmt, shifts: shifts.length };
+  }
+
+  // Monthly breakdown from shifts
+  const monthlyBreakdown = Array.from({ length: currentMonth + 1 }, (_, i) => {
+    const monthShifts = state.incomes.flatMap(inc =>
+      (inc.dailyShifts || []).filter(s => {
+        const d = new Date(s.date + "T12:00:00");
+        return d.getFullYear() === currentYear && d.getMonth() === i && s.worked;
+      })
+    );
+    return {
+      name: months[i],
+      gross: monthShifts.reduce((s, sh) => s + sh.gross, 0),
+      hours: monthShifts.reduce((s, sh) => s + sh.hoursWorked, 0),
+    };
+  });
+
+  return (
+    <div>
+      <div style={{ marginBottom: 20 }}>
+        <h2 style={{ margin: "0 0 4px", fontSize: 22, fontWeight: 900 }}>📈 Year-to-Date</h2>
+        <p style={{ margin: 0, color: "var(--muted)", fontSize: 13 }}>{currentYear} earnings summary</p>
+      </div>
+
+      {/* Hero stats */}
+      <Card style={{ background: "var(--gradient)", border: "none", marginBottom: 16, textAlign: "center" }}>
+        <div style={{ color: "rgba(255,255,255,0.8)", fontSize: 13, fontWeight: 700 }}>YTD Gross (Logged)</div>
+        <div style={{ color: "#fff", fontSize: 38, fontWeight: 900, marginTop: 4 }}>{fmt(ytdGross)}</div>
+        <div style={{ color: "rgba(255,255,255,0.7)", fontSize: 13, marginTop: 4 }}>{ytdHours.toFixed(1)} hours worked</div>
+      </Card>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+        <Card>
+          <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase" }}>Est. YTD Net</div>
+          <div style={{ fontSize: 20, fontWeight: 900, color: "#52C97D" }}>{fmt(estimatedYTDNet)}</div>
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>Based on {currentMonth + 1} months</div>
+        </Card>
+        <Card>
+          <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase" }}>Monthly Average</div>
+          <div style={{ fontSize: 20, fontWeight: 900, color: "var(--accent)" }}>{fmt(monthlyNet)}</div>
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>Combined income</div>
+        </Card>
+      </div>
+
+      {/* Per income source */}
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ fontWeight: 800, marginBottom: 14, fontSize: 15 }}>By Income Source</div>
+        {state.incomes.map(inc => {
+          const ytd = incomeYTD(inc);
+          return (
+            <div key={inc.id} style={{ marginBottom: 14, padding: "12px", borderRadius: 14, background: "var(--bg)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <div style={{ width: 8, height: 8, borderRadius: "50%", background: inc.color }} />
+                <span style={{ fontWeight: 800, fontSize: 14 }}>{inc.label}</span>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                {[["Gross", fmt(ytd.gross)], ["Received", fmt(ytd.received)], [inc.type === "shift" ? "Hours" : "Months", inc.type === "shift" ? `${ytd.hours.toFixed(0)}h` : `${currentMonth + 1}`]].map(([l, v]) => (
+                  <div key={l} style={{ textAlign: "center", padding: "6px 4px", borderRadius: 10, background: "var(--card)" }}>
+                    <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 700 }}>{l}</div>
+                    <div style={{ fontSize: 14, fontWeight: 900, color: "var(--text)", marginTop: 2 }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              {ytd.shifts > 0 && <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>{ytd.shifts} shifts logged this year</div>}
+            </div>
+          );
+        })}
+      </Card>
+
+      {/* Monthly breakdown chart */}
+      {monthlyBreakdown.some(m => m.gross > 0) && (
+        <Card style={{ marginBottom: 16 }}>
+          <div style={{ fontWeight: 800, marginBottom: 12, fontSize: 15 }}>Monthly Earnings (Logged Shifts)</div>
+          <ResponsiveContainer width="100%" height={160}>
+            <BarChart data={monthlyBreakdown}>
+              <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+              <YAxis tickFormatter={v => `$${(v/1000).toFixed(1)}k`} tick={{ fontSize: 11 }} />
+              <Tooltip formatter={v => fmt(v)} />
+              <Bar dataKey="gross" name="Gross" fill="var(--accent)" radius={[6, 6, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
+      )}
+
+      {monthlyBreakdown.every(m => m.gross === 0) && (
+        <Card>
+          <div style={{ textAlign: "center", padding: "20px 0", color: "var(--muted)", fontSize: 14 }}>
+            📝 Log shifts in the Income section to see YTD data here!
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 const NAV = [
-  { id: "dashboard", label: "Home", icon: "home" },
-  { id: "income", label: "Income", icon: "income" },
+  { id: "dashboard", label: "Overview", icon: "home" },        // UPDATED label
+  { id: "income-zai", label: "Zai", icon: "income" },          // NEW: Zaira-only income
+  { id: "income-ariel", label: "Ariel", icon: "income" },      // NEW: Ariel-only income
   { id: "expenses", label: "Expenses", icon: "expense" },
-  { id: "debt", label: "Debt", icon: "debt" },
+  { id: "payday", label: "Payday", icon: "calendar" },         // NEW: Biweekly planner
+  { id: "monthly", label: "Monthly", icon: "chart" },          // NEW: Monthly overview
   { id: "cards", label: "Cards", icon: "card" },
-  { id: "installments", label: "Payments", icon: "installment" },
   { id: "goals", label: "Goals", icon: "goal" },
+  { id: "todo", label: "To-Do", icon: "todo" },
+  { id: "ytd", label: "YTD", icon: "forecast" },               // NEW: Year-to-date
+  { id: "debt", label: "Debt", icon: "debt" },
+  { id: "installments", label: "Payments", icon: "installment" },
   { id: "ai", label: "AI Coach", icon: "ai" },
-  { id: "todo", label: "Tasks", icon: "todo" },
   { id: "mood", label: "Mood", icon: "mood" },
   { id: "meds", label: "Meds", icon: "med" },
   { id: "analytics", label: "Analytics", icon: "chart" },
@@ -2015,10 +2828,20 @@ export default function App() {
     );
   }
 
+  // NEW: Filter incomes by person name
+  const zaiIncomes = state.incomes.filter(i => i.label.toLowerCase().includes("zai") || i.label.toLowerCase().includes("zaira") || i.label.toLowerCase().includes("a&w") || i.label.toLowerCase().includes("loblaws"));
+  const arielIncomes = state.incomes.filter(i => i.label.toLowerCase().includes("ariel") || i.label.toLowerCase().includes("building") || i.label.toLowerCase().includes("super") || i.label.toLowerCase().includes("witron"));
+  // Fallback: split by index if no name match
+  const zaiList = zaiIncomes.length > 0 ? zaiIncomes : state.incomes.filter((_, i) => i % 2 === 0);
+  const arielList = arielIncomes.length > 0 ? arielIncomes : state.incomes.filter((_, i) => i % 2 === 1);
+
   const PAGE = {
     dashboard: <Dashboard state={state} update={update} />,
-    income: <IncomeTracker state={state} update={update} />,
+    "income-zai": <IncomeTracker state={{ ...state, incomes: zaiList }} update={update} allIncomes={state.incomes} />,   // NEW
+    "income-ariel": <IncomeTracker state={{ ...state, incomes: arielList }} update={update} allIncomes={state.incomes} />, // NEW
     expenses: <ExpenseTracker state={state} update={update} />,
+    payday: <PaydayPlanner state={state} update={update} />,       // NEW
+    monthly: <MonthlyOverview state={state} update={update} />,    // NEW
     debt: <DebtCrusher state={state} update={update} />,
     cards: <CreditCards state={state} update={update} />,
     installments: <Installments state={state} update={update} />,
@@ -2027,6 +2850,7 @@ export default function App() {
     todo: <TodoList state={state} update={update} />,
     mood: <MoodTracker state={state} update={update} />,
     meds: <MedTracker state={state} update={update} />,
+    ytd: <YTDTracker state={state} />,                             // NEW
     analytics: <Analytics state={state} />,
     settings: <Settings state={state} update={update} />,
   };
@@ -2078,14 +2902,15 @@ export default function App() {
         {PAGE[activeTab]}
       </div>
 
-      {/* Bottom Nav (mobile) */}
-      <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 50, background: "var(--card)", borderTop: "1px solid var(--border)", padding: "8px 4px env(safe-area-inset-bottom)", display: "flex", justifyContent: "space-around", backdropFilter: "blur(12px)" }}>
-        {["dashboard","income","expenses","ai","settings"].map(id => {
+      {/* Bottom Nav (mobile) — UPDATED to show priority tabs */}
+      <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 50, background: "var(--card)", borderTop: "1px solid var(--border)", padding: "6px 2px env(safe-area-inset-bottom)", display: "flex", justifyContent: "space-around", backdropFilter: "blur(12px)" }}>
+        {["dashboard","income-zai","income-ariel","expenses","monthly"].map(id => {
           const item = NAV.find(n => n.id === id);
+          if (!item) return null;
           return (
-            <button key={id} onClick={() => setActiveTab(id)} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "6px 10px", border: "none", background: "transparent", cursor: "pointer", color: activeTab === id ? theme.accent : theme.muted, fontFamily: "inherit" }}>
+            <button key={id} onClick={() => setActiveTab(id)} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "5px 8px", border: "none", background: "transparent", cursor: "pointer", color: activeTab === id ? theme.accent : theme.muted, fontFamily: "inherit", minWidth: 44 }}>
               <Icon name={item.icon} size={20} color={activeTab === id ? theme.accent : theme.muted} />
-              <span style={{ fontSize: 10, fontWeight: 700 }}>{item.label}</span>
+              <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.3 }}>{item.label}</span>
             </button>
           );
         })}
