@@ -1,167 +1,529 @@
 /**
  * Expenses.jsx
- * Expenses page — connected to Supabase user_data.
+ * Expenses page — exact V2 spec, connected to Supabase.
+ * Features: period nav, carryover bar, add form with all 7 fields,
+ * expense list with paid toggle / delete / due-date urgency,
+ * period summary, recurring label.
  */
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { supabase } from "../lib/supabaseClient";
-import SoftCard from "../components/common/SoftCard";
-import ProgressBar from "../components/common/ProgressBar";
 import LoadingSpinner from "../components/common/LoadingSpinner";
 import { colors, typography, radii, transitions } from "../ui/designTokens";
 
-const fmt = n => new Intl.NumberFormat("en-CA",{style:"currency",currency:"CAD",maximumFractionDigits:0}).format(n);
+// ── Period engine ─────────────────────────────────────────────────────────────
+// 24 bi-monthly periods for 2026 (1–15 and 16–end each month)
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const FULL_MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
-const CATEGORY_META = {
-  Fixed:    { color: colors.pink,  bg: colors.pinkPale,  emoji: "📌" },
-  Variable: { color: colors.mauve, bg: colors.mauvePale, emoji: "🔀" },
-  default:  { color: colors.gold,  bg: colors.goldPale,  emoji: "📄" },
+function buildPeriods() {
+  const out = [];
+  const year = 2026;
+  for (let m = 0; m < 12; m++) {
+    const lastDay = new Date(year, m + 1, 0).getDate();
+    // First half: 1–15, payday 7th
+    out.push({
+      k:   `${String(year).slice(2)}${m}a`,
+      lbl: `${MONTHS[m]} 1–15`,
+      s:   new Date(year, m, 1),
+      e:   new Date(year, m, 15, 23, 59, 59),
+      pd:  new Date(year, m, 7),
+    });
+    // Second half: 16–end, payday 22nd
+    out.push({
+      k:   `${String(year).slice(2)}${m}b`,
+      lbl: `${MONTHS[m]} 16–${lastDay}`,
+      s:   new Date(year, m, 16),
+      e:   new Date(year, m, lastDay, 23, 59, 59),
+      pd:  new Date(year, m, 22),
+    });
+  }
+  return out;
+}
+
+const PERIODS = buildPeriods();
+
+function currentPeriodIdx() {
+  const now = new Date();
+  const idx = PERIODS.findIndex(p => now >= p.s && now <= p.e);
+  return idx >= 0 ? idx : Math.max(0, PERIODS.findIndex(p => p.s > now) - 1);
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const fmt = n =>
+  new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", minimumFractionDigits: 2 })
+    .format(n ?? 0).replace("CA$", "$");
+
+const todayStr = () => new Date().toISOString().split("T")[0];
+
+function daysDiff(dateStr) {
+  if (!dateStr) return null;
+  const d = new Date(dateStr + "T12:00:00");
+  const t = new Date();
+  t.setHours(0, 0, 0, 0);
+  return Math.ceil((d - t) / 86400000);
+}
+
+function fdFull(dateStr) {
+  if (!dateStr) return "";
+  const d = new Date(dateStr + "T12:00:00");
+  return d.toLocaleDateString("en-CA", { weekday:"short", month:"short", day:"numeric" });
+}
+
+// Categories — exact V2 list
+const CATEGORIES = [
+  { value:"rent",          label:"🏠 Rent / Housing" },
+  { value:"utilities",     label:"💡 Utilities" },
+  { value:"groceries",     label:"🛒 Groceries" },
+  { value:"transport",     label:"🚌 Transport" },
+  { value:"phone",         label:"📱 Phone" },
+  { value:"internet",      label:"🌐 Internet" },
+  { value:"subscriptions", label:"📺 Subscriptions" },
+  { value:"dining",        label:"🍜 Dining" },
+  { value:"health",        label:"💊 Health" },
+  { value:"savings",       label:"💰 Savings" },
+  { value:"remittance",    label:"🇵🇭 Remittance" },
+  { value:"school",        label:"📚 School" },
+  { value:"credit",        label:"💳 CC Bill" },
+  { value:"installment",   label:"📦 Installment" },
+  { value:"other",         label:"🗂 Other" },
+];
+
+const CAT_ICON = c => ({
+  rent:"🏠", utilities:"💡", groceries:"🛒", transport:"🚌",
+  phone:"📱", internet:"🌐", subscriptions:"📺", dining:"🍜",
+  health:"💊", savings:"💰", remittance:"🇵🇭", school:"📚",
+  credit:"💳", installment:"📦", other:"🗂",
+}[c] ?? "🗂");
+
+const PAY_TYPES = [
+  { value:"banking",   label:"🏦 Online Banking" },
+  { value:"etransfer", label:"📲 e-Transfer" },
+  { value:"auto",      label:"🔁 Auto-Pay" },
+  { value:"debit",     label:"💳 Debit" },
+  { value:"cash",      label:"💵 Cash" },
+  { value:"cheque",    label:"📝 Cheque" },
+];
+
+const RECUR_OPTS = [
+  { value:"no",        label:"One-time only" },
+  { value:"monthly",   label:"Monthly" },
+  { value:"biweekly",  label:"Every pay period" },
+];
+
+// ── Shared element styles (exact V2) ─────────────────────────────────────────
+const cardStyle = {
+  background: "#ffffff",
+  border: "1px solid #fce7f3",
+  borderRadius: "14px",
+  padding: "16px",
+  marginBottom: "12px",
+  boxShadow: "0 1px 4px rgba(26,15,30,.07),0 4px 18px rgba(26,15,30,.07)",
 };
 
-const PRIORITY_META = {
-  high:   { color: colors.pinkDeep, label: "High"   },
-  medium: { color: colors.gold,     label: "Medium" },
-  low:    { color: colors.teal,     label: "Low"    },
+const inp = {
+  width: "100%", padding: "9px 11px",
+  background: "#fff5f9", border: "1.5px solid #fce7f3",
+  borderRadius: "9px", fontFamily: "'DM Sans',sans-serif",
+  fontSize: "14px", color: "#1a0f1e", outline: "none",
+  transition: "border-color .15s", WebkitAppearance: "none",
 };
 
-export default function Expenses() {
-  const [rawData, setRawData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error,   setError]   = useState(null);
-  const [filter,  setFilter]  = useState("all");
+function Label({ children }) {
+  return (
+    <div style={{ display:"block", fontSize:"0.62rem", fontWeight:700, textTransform:"uppercase", letterSpacing:"0.07em", color:"#9b6b8a", margin:"11px 0 4px" }}>
+      {children}
+    </div>
+  );
+}
 
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function Toast({ msg, onDone }) {
   useEffect(() => {
-    let cancelled = false;
-    async function load() {
+    if (!msg) return;
+    const t = setTimeout(onDone, 2200);
+    return () => clearTimeout(t);
+  }, [msg]);
+  if (!msg) return null;
+  return (
+    <div style={{
+      position:"fixed", bottom:"90px", left:"50%", transform:"translateX(-50%)",
+      background:"#1a0f1e", color:"#f6f2ec", borderRadius:"99px",
+      padding:"9px 20px", fontSize:"13px", fontWeight:600,
+      zIndex:700, whiteSpace:"nowrap", boxShadow:"0 4px 20px rgba(0,0,0,0.25)",
+      animation:"fadeUp .2s ease both",
+    }}>{msg}</div>
+  );
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
+export default function Expenses() {
+  const [rawData,  setRawData]  = useState(null);
+  const [loading,  setLoading]  = useState(true);
+  const [saving,   setSaving]   = useState(false);
+  const [error,    setError]    = useState(null);
+  const [toast,    setToast]    = useState("");
+  const [expIdx,   setExpIdx]   = useState(currentPeriodIdx);
+
+  // Add form state
+  const blank = { name:"", amt:"", due:"", cat:"rent", card:"", payType:"banking", recur:"no" };
+  const [form, setForm] = useState(blank);
+
+  // ── Load ────────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    let dead = false;
+    (async () => {
       setLoading(true); setError(null);
       try {
-        const { data, error:e } = await supabase.from("user_data").select("data").limit(1).single();
+        const { data, error: e } = await supabase.from("user_data").select("data").limit(1).single();
         if (e) throw e;
-        if (cancelled) return;
+        if (dead) return;
         const blob = data?.data?.budgetsbloom;
-        setRawData(typeof blob==="string"?JSON.parse(blob):blob??null);
-      } catch(err) { if(!cancelled) setError(err.message||"Failed to load"); }
-      finally      { if(!cancelled) setLoading(false); }
-    }
-    load(); return ()=>{cancelled=true;};
+        setRawData(typeof blob === "string" ? JSON.parse(blob) : blob ?? null);
+      } catch (err) {
+        if (!dead) setError(err.message ?? "Failed to load");
+      } finally {
+        if (!dead) setLoading(false);
+      }
+    })();
+    return () => { dead = true; };
   }, []);
 
-  const expenses = useMemo(() => rawData?.expenses ?? [], [rawData]);
+  // ── Save ─────────────────────────────────────────────────────────────────
+  const save = useCallback(async (updated) => {
+    setSaving(true);
+    try {
+      const { data: row } = await supabase.from("user_data").select("id").limit(1).single();
+      await supabase.from("user_data")
+        .update({ data: { budgetsbloom: JSON.stringify(updated) } })
+        .eq("id", row.id);
+      setRawData(updated);
+    } catch (e) {
+      setToast("❌ Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }, []);
 
-  const filtered = useMemo(() => {
-    if (filter==="all")  return expenses;
-    if (filter==="paid") return expenses.filter(e=>e.paid);
-    return expenses.filter(e=>!e.paid);
-  }, [expenses, filter]);
+  // ── Derived data ──────────────────────────────────────────────────────────
+  const allExpenses   = useMemo(() => rawData?.expenses ?? [], [rawData]);
+  const cards         = useMemo(() => rawData?.cards ?? [], [rawData]);
+  const sentMap       = useMemo(() => rawData?.sent ?? {}, [rawData]);
 
-  const totalMonthly  = expenses.filter(e=>e.recurring).reduce((s,e)=>s+(Number(e.amount)||0),0);
-  const totalPaid     = expenses.filter(e=>e.paid).reduce((s,e)=>s+(Number(e.amount)||0),0);
-  const totalUnpaid   = expenses.filter(e=>!e.paid).reduce((s,e)=>s+(Number(e.amount)||0),0);
-  const paidPct       = totalMonthly>0 ? Math.round(totalPaid/totalMonthly*100) : 0;
+  const period = PERIODS[expIdx];
+  const periodKey = period?.k ?? "";
 
+  // Filter expenses to current period
+  const periodExpenses = useMemo(() => {
+    if (!period) return [];
+    return allExpenses.filter(e => {
+      if (!e.due) return false;
+      const d = new Date(e.due + "T12:00:00");
+      return d >= period.s && d <= period.e;
+    }).sort((a, b) => new Date(a.due) - new Date(b.due));
+  }, [allExpenses, period]);
+
+  // Carryover (recursive via chain)
+  const getCarryover = useCallback((pidx) => {
+    if (pidx <= 0) return 0;
+    const k    = PERIODS[pidx]?.k;
+    const co   = rawData?.carryovers?.[k];
+    if (co && co.use === false) return 0;
+    if (co && co.amt != null)  return co.amt;
+    // auto-calc from previous period
+    const prevK    = PERIODS[pidx - 1].k;
+    const prevSent = (sentMap[prevK] ?? []).reduce((s, x) => s + (x.amt ?? 0), 0);
+    const prevCo   = getCarryover(pidx - 1);
+    const prevExps = allExpenses.filter(e => {
+      if (!e.due) return false;
+      const d = new Date(e.due + "T12:00:00");
+      return d >= PERIODS[pidx-1].s && d <= PERIODS[pidx-1].e;
+    }).reduce((s, e) => s + (e.amt ?? 0), 0);
+    return Math.max(0, prevSent + prevCo - prevExps);
+  }, [rawData, sentMap, allExpenses]);
+
+  const carryover = useMemo(() => getCarryover(expIdx), [getCarryover, expIdx]);
+
+  const income = useMemo(() =>
+    (sentMap[periodKey] ?? []).reduce((s, x) => s + (x.amt ?? 0), 0),
+  [sentMap, periodKey]);
+
+  const totalAmt  = useMemo(() => periodExpenses.reduce((s,e) => s + (e.amt ?? 0), 0), [periodExpenses]);
+  const paidAmt   = useMemo(() => periodExpenses.filter(e=>e.paid).reduce((s,e) => s + (e.amt ?? 0), 0), [periodExpenses]);
+  const paidCount = useMemo(() => periodExpenses.filter(e=>e.paid).length, [periodExpenses]);
+  const pool      = income + carryover;
+  const remaining = pool - totalAmt;
+
+  // ── Actions ───────────────────────────────────────────────────────────────
+  function addExpense() {
+    if (!form.name.trim() || !form.amt) { setToast("⚠️ Name and amount required"); return; }
+    const due = form.due || period.pd.toISOString().split("T")[0];
+    const expense = {
+      id:      "e" + Date.now(),
+      name:    form.name.trim(),
+      amt:     parseFloat(form.amt),
+      due,
+      cat:     form.cat,
+      card:    form.card,
+      payType: form.payType,
+      recur:   form.recur,
+      paid:    false,
+    };
+    save({ ...rawData, expenses: [...allExpenses, expense] });
+    setForm(f => ({ ...blank, cat: f.cat, payType: f.payType, recur: f.recur })); // keep dropdowns
+    setToast("✅ Expense added!");
+  }
+
+  function togglePaid(id, val) {
+    save({ ...rawData, expenses: allExpenses.map(e => e.id === id ? { ...e, paid: val } : e) });
+    if (val) setToast("✅ Marked as paid!");
+  }
+
+  function delExpense(id) {
+    save({ ...rawData, expenses: allExpenses.filter(e => e.id !== id) });
+    setToast("🗑 Removed");
+  }
+
+  function moveExp(dir) {
+    setExpIdx(i => Math.max(0, Math.min(PERIODS.length - 1, i + dir)));
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div style={{ minHeight:"100vh",backgroundColor:colors.bg,fontFamily:typography.fontBody,
-      color:colors.text,paddingBottom:"80px" }}>
-      <div style={{ maxWidth:"520px",margin:"0 auto",padding:"0 16px" }}>
+    <div style={{ minHeight:"100vh", background:"#fdf6f8", fontFamily:"'DM Sans',sans-serif", color:"#1a0f1e", paddingBottom:"80px" }}>
+      <div style={{ maxWidth:"640px", margin:"0 auto", padding:"14px" }}>
 
         {/* Header */}
-        <div className="fade-up" style={{ padding:"40px 0 24px" }}>
-          <p style={{ fontSize:"11px",fontWeight:700,color:colors.textMuted,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:"4px" }}>Monthly</p>
-          <h1 style={{ fontFamily:typography.fontDisplay,fontSize:"30px",fontWeight:700,color:colors.text,letterSpacing:"-0.03em",lineHeight:1.1 }}>Expenses</h1>
+        <div className="fade-up" style={{ padding:"28px 0 14px" }}>
+          <p style={{ fontSize:"11px", fontWeight:700, color:"#9b6b8a", letterSpacing:"0.12em", textTransform:"uppercase", marginBottom:"4px" }}>Budget</p>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline" }}>
+            <h1 style={{ fontFamily:typography.fontDisplay, fontSize:"28px", fontWeight:700, color:"#1a0f1e", letterSpacing:"-0.02em", lineHeight:1.1 }}>Expenses</h1>
+            {saving && <span style={{ fontSize:"11px", color:"#9b6b8a" }}>Saving…</span>}
+          </div>
         </div>
 
         {loading && <LoadingSpinner message="Loading expenses…" />}
-        {error   && <SoftCard variant="highlight" style={{ marginBottom:"16px",color:colors.pinkDeep,fontSize:"13px" }}>⚠ {error}</SoftCard>}
+        {error   && <div style={{ background:"#fdedf1", border:"1px solid #f4a0b4", borderRadius:"14px", padding:"14px", marginBottom:"12px", color:"#c94d6a", fontSize:"13px" }}>⚠ {error}</div>}
 
-        {!loading && (
+        {!loading && !error && (
           <>
-            {/* Summary */}
-            <SoftCard variant="base" style={{ marginBottom:"14px" }} noAnimate>
-              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"10px" }}>
-                <span style={{ fontSize:"12px",fontWeight:600,color:colors.textSoft }}>Monthly Total</span>
-                <span style={{ fontFamily:typography.fontDisplay,fontSize:"20px",fontWeight:700,color:colors.pinkDeep }}>{fmt(totalMonthly)}</span>
+            {/* ── Carryover bar ── */}
+            {carryover > 0 && (
+              <div style={{ background:"#eaf3ee", border:"1px solid #9ecab0", borderRadius:"9px", padding:"10px 14px", marginBottom:"10px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <div>
+                  <div style={{ fontSize:"0.61rem", fontWeight:700, textTransform:"uppercase", letterSpacing:"0.06em", color:"#3a6b4e" }}>Carryover from last period</div>
+                  <div style={{ fontWeight:700, fontSize:"0.97rem", color:"#3a6b4e" }}>{fmt(carryover)}</div>
+                </div>
+                <span style={{ fontSize:"0.72rem", color:"#3a6b4e" }}>✓ Included in pool</span>
               </div>
-              <ProgressBar pct={paidPct} color={colors.teal} height="6px" animDelay="0.2s" showLabel label={`${fmt(totalPaid)} paid`} />
-            </SoftCard>
+            )}
 
-            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px",marginBottom:"16px" }}>
-              <SoftCard variant="teal" padding="14px" noAnimate>
-                <div style={{ fontSize:"10px",fontWeight:700,color:colors.tealDeep,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:"2px" }}>Paid</div>
-                <div style={{ fontFamily:typography.fontDisplay,fontSize:"20px",fontWeight:700,color:colors.tealDeep }}>{fmt(totalPaid)}</div>
-              </SoftCard>
-              <SoftCard variant="highlight" padding="14px" noAnimate>
-                <div style={{ fontSize:"10px",fontWeight:700,color:colors.pinkDeep,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:"2px" }}>Remaining</div>
-                <div style={{ fontFamily:typography.fontDisplay,fontSize:"20px",fontWeight:700,color:colors.pinkDeep }}>{fmt(totalUnpaid)}</div>
-              </SoftCard>
+            {/* ── Period navigator ── */}
+            <div style={{ display:"flex", alignItems:"center", gap:"6px", marginBottom:"12px" }}>
+              <button onClick={() => moveExp(-1)} disabled={expIdx===0} style={{
+                background:"#ffffff", border:"1.5px solid #f0dce4", borderRadius:"9px",
+                padding:"7px 12px", fontWeight:700, color:"#9b6b8a",
+                cursor: expIdx===0 ? "not-allowed" : "pointer",
+                fontFamily:"'DM Sans',sans-serif", fontSize:"14px",
+                opacity: expIdx===0 ? 0.4 : 1,
+              }}>‹</button>
+              <div style={{ flex:1, textAlign:"center", background:"#ffffff", border:"1.5px solid #f0dce4", borderRadius:"9px", padding:"7px 10px", fontFamily:typography.fontDisplay, fontWeight:700, fontSize:"14px" }}>
+                {period?.lbl}
+              </div>
+              <button onClick={() => moveExp(1)} disabled={expIdx===PERIODS.length-1} style={{
+                background:"#ffffff", border:"1.5px solid #f0dce4", borderRadius:"9px",
+                padding:"7px 12px", fontWeight:700, color:"#9b6b8a",
+                cursor: expIdx===PERIODS.length-1 ? "not-allowed" : "pointer",
+                fontFamily:"'DM Sans',sans-serif", fontSize:"14px",
+                opacity: expIdx===PERIODS.length-1 ? 0.4 : 1,
+              }}>›</button>
             </div>
 
-            {/* Filter tabs */}
-            <div style={{ display:"flex",gap:"6px",marginBottom:"16px" }}>
-              {[["all","All"],["unpaid","Unpaid"],["paid","Paid ✓"]].map(([val,label])=>(
-                <button key={val} onClick={()=>setFilter(val)} style={{
-                  flex:1,padding:"8px 6px",borderRadius:radii.full,
-                  border:`1.5px solid ${filter===val?colors.pink:colors.border}`,
-                  backgroundColor:filter===val?colors.pinkPale:colors.bgCard,
-                  color:filter===val?colors.pinkDeep:colors.textMuted,
-                  fontSize:"12px",fontWeight:700,cursor:"pointer",
-                  transition:`all ${transitions.base}`,
-                }}>{label}</button>
-              ))}
+            {/* ── Yellow info alert ── */}
+            <div style={{ background:"#faf5e6", border:"1px solid #dcca84", borderRadius:"9px", padding:"10px 14px", marginBottom:"12px", fontSize:"0.79rem", color:"#7a5010", lineHeight:1.5 }}>
+              💸 Paydays are the <strong>7th & 22nd</strong>. Expenses shown by due date within the period.
             </div>
 
-            {/* Expense list */}
-            <div style={{ display:"flex",flexDirection:"column",gap:"10px" }}>
-              {filtered.length===0 ? (
-                <SoftCard variant="ghost" style={{ textAlign:"center",padding:"32px",color:colors.textFaint,fontSize:"13px" }} noAnimate>
-                  No expenses found.
-                </SoftCard>
-              ) : filtered.map((expense,i) => {
-                const cat  = CATEGORY_META[expense.category] || CATEGORY_META.default;
-                const pri  = PRIORITY_META[expense.priority] || PRIORITY_META.medium;
-                return (
-                  <SoftCard key={expense.id??i} variant="base" padding="14px 16px"
-                    animDelay={i*0.05} style={{ opacity:expense.paid?0.65:1 }}>
-                    <div style={{ display:"flex",alignItems:"center",gap:"12px" }}>
-                      <div style={{ width:"38px",height:"38px",borderRadius:radii.md,flexShrink:0,
-                        backgroundColor:cat.bg,display:"flex",alignItems:"center",justifyContent:"center",
-                        fontSize:"18px" }}>
-                        {expense.paid ? "✅" : cat.emoji}
-                      </div>
-                      <div style={{ flex:1,minWidth:0 }}>
-                        <div style={{ display:"flex",alignItems:"center",gap:"6px",marginBottom:"2px" }}>
-                          <span style={{ fontSize:"14px",fontWeight:600,color:colors.text,
-                            textDecoration:expense.paid?"line-through":"none" }}>
-                            {expense.label}
-                          </span>
-                          {expense.recurring && (
-                            <span style={{ fontSize:"9px",color:colors.mauve,fontWeight:700,
-                              backgroundColor:colors.mauvePale,padding:"1px 5px",borderRadius:radii.full }}>
-                              🔄 Monthly
+            {/* ── Add Expense form ── */}
+            <div style={cardStyle}>
+              <div style={{ fontFamily:typography.fontDisplay, fontSize:"0.97rem", fontWeight:700, marginBottom:"4px" }}>+ Add Expense</div>
+
+              <Label>Name</Label>
+              <input style={inp} id="e-name" placeholder="e.g. Rent, Hydro, Netflix" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))}
+                onKeyDown={e=>e.key==="Enter"&&addExpense()} />
+
+              {/* Amount + Due Date side by side */}
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px" }}>
+                <div>
+                  <Label>Amount ($)</Label>
+                  <input style={inp} type="number" placeholder="0.00" step="0.01" value={form.amt} onChange={e=>setForm(f=>({...f,amt:e.target.value}))} />
+                </div>
+                <div>
+                  <Label>Due Date</Label>
+                  <input style={inp} type="date" value={form.due} onChange={e=>setForm(f=>({...f,due:e.target.value}))} />
+                </div>
+              </div>
+
+              <Label>Category</Label>
+              <select style={inp} value={form.cat} onChange={e=>setForm(f=>({...f,cat:e.target.value}))}>
+                {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+
+              <Label>Charge To</Label>
+              <select style={inp} value={form.card} onChange={e=>setForm(f=>({...f,card:e.target.value}))}>
+                <option value="">Cash / Debit / Chequing</option>
+                {cards.map(c => (
+                  <option key={c.id} value={c.id}>{(c.label??c.name)} ({c.owner})</option>
+                ))}
+              </select>
+
+              <Label>Pay Type</Label>
+              <select style={inp} value={form.payType} onChange={e=>setForm(f=>({...f,payType:e.target.value}))}>
+                {PAY_TYPES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+              </select>
+
+              <Label>Recurring?</Label>
+              <select style={inp} value={form.recur} onChange={e=>setForm(f=>({...f,recur:e.target.value}))}>
+                {RECUR_OPTS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+              </select>
+
+              <button
+                onClick={addExpense}
+                style={{ width:"100%", marginTop:"10px", padding:"10px", borderRadius:"9px", background:"#db2777", border:"none", color:"#fff", fontFamily:"'DM Sans',sans-serif", fontWeight:700, fontSize:"14px", cursor:"pointer" }}
+              >+ Add Expense</button>
+            </div>
+
+            {/* ── Expense list ── */}
+            <div style={cardStyle}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"12px" }}>
+                <div style={{ fontFamily:typography.fontDisplay, fontSize:"0.97rem", fontWeight:700 }}>
+                  Expenses <span style={{ fontFamily:"'DM Sans',sans-serif", fontSize:"0.7rem", fontWeight:400, color:"#9b6b8a", marginLeft:"4px" }}>— {period?.lbl}</span>
+                </div>
+                <span style={{ fontWeight:700, color:"#db2777", fontSize:"0.85rem" }}>{fmt(totalAmt)}</span>
+              </div>
+
+              {periodExpenses.length === 0 ? (
+                <p style={{ color:"#9b6b8a", fontSize:"0.75rem" }}>No expenses for this period. Add one above!</p>
+              ) : (
+                periodExpenses.map((e, i) => {
+                  const diff    = daysDiff(e.due);
+                  const overdue = diff !== null && diff < 0 && !e.paid;
+                  const soon    = diff !== null && diff >= 0 && diff <= 3 && !e.paid;
+                  const linkedCard = cards.find(c => c.id === e.card);
+
+                  return (
+                    <div
+                      key={e.id}
+                      style={{
+                        display:"flex", alignItems:"center", gap:"9px",
+                        padding:"9px 0",
+                        borderBottom: i < periodExpenses.length-1 ? "1px solid #fce7f3" : "none",
+                        opacity: e.paid ? 0.42 : 1,
+                      }}
+                    >
+                      {/* Checkbox */}
+                      <input
+                        type="checkbox"
+                        checked={!!e.paid}
+                        onChange={ev => togglePaid(e.id, ev.target.checked)}
+                        style={{ width:"17px", height:"17px", flexShrink:0, cursor:"pointer", accentColor:"#3a6b4e" }}
+                      />
+
+                      {/* Body */}
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontSize:"0.83rem", fontWeight:600, textDecoration:e.paid?"line-through":"none" }}>
+                          {CAT_ICON(e.cat)} {e.name}
+                          {linkedCard && (
+                            <span style={{ background:"#eaf1f9", color:"#2860a0", fontSize:"0.57rem", fontWeight:700, letterSpacing:"0.06em", textTransform:"uppercase", padding:"2px 7px", borderRadius:"5px", marginLeft:"5px" }}>
+                              {linkedCard.label ?? linkedCard.name}
+                            </span>
+                          )}
+                          {e.recur !== "no" && (
+                            <span style={{ background:"#f5f0ff", color:"#7c3aed", fontSize:"0.57rem", fontWeight:700, letterSpacing:"0.06em", textTransform:"uppercase", padding:"2px 7px", borderRadius:"5px", marginLeft:"4px" }}>
+                              {e.recur === "monthly" ? "Monthly" : "Biweekly"}
                             </span>
                           )}
                         </div>
-                        <div style={{ display:"flex",alignItems:"center",gap:"8px" }}>
-                          <span style={{ fontSize:"10px",color:cat.color,fontWeight:600 }}>{expense.category}</span>
-                          {expense.dueDay && (
-                            <span style={{ fontSize:"10px",color:colors.textMuted }}>Due day {expense.dueDay}</span>
-                          )}
-                          <span style={{ fontSize:"10px",fontWeight:700,color:pri.color }}>{pri.label}</span>
+                        <div style={{ fontSize:"0.67rem", color:"#9b6b8a", marginTop:"1px" }}>
+                          Due {e.due}
+                          {overdue && <strong style={{ color:"#c24b1a", marginLeft:"4px" }}>OVERDUE</strong>}
+                          {soon    && <span  style={{ color:"#a67c20", marginLeft:"4px" }}>· Due soon</span>}
                         </div>
                       </div>
-                      <div style={{ textAlign:"right",flexShrink:0 }}>
-                        <div style={{ fontFamily:typography.fontDisplay,fontSize:"16px",
-                          fontWeight:700,color:expense.paid?colors.teal:colors.pinkDeep }}>
-                          {fmt(expense.amount)}
-                        </div>
+
+                      {/* Right: amount + delete */}
+                      <div style={{ textAlign:"right", flexShrink:0 }}>
+                        <div style={{ fontSize:"0.85rem", fontWeight:700 }}>{fmt(e.amt)}</div>
+                        <button
+                          onClick={() => delExpense(e.id)}
+                          style={{ background:"none", border:"none", cursor:"pointer", color:"#d4b8c4", fontSize:"0.95rem", padding:"0 2px", transition:"color .15s" }}
+                          onMouseEnter={e2=>e2.target.style.color="#c24b1a"}
+                          onMouseLeave={e2=>e2.target.style.color="#d4b8c4"}
+                        >🗑</button>
                       </div>
                     </div>
-                  </SoftCard>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
+
+            {/* ── Period Summary ── */}
+            <div style={cardStyle}>
+              <div style={{ fontFamily:typography.fontDisplay, fontSize:"0.97rem", fontWeight:700, marginBottom:"10px" }}>📊 Period Summary</div>
+              <div style={{ background:"#fff5f9", border:"1px solid #fce7f3", borderRadius:"9px", padding:"13px" }}>
+                {/* Income */}
+                <div style={{ display:"flex", justifyContent:"space-between", fontSize:"0.81rem", marginBottom:"6px" }}>
+                  <span style={{ color:"#9b6b8a" }}>Income this period</span>
+                  <span style={{ fontWeight:700, color:"#3a6b4e" }}>{fmt(income)}</span>
+                </div>
+                {/* Carryover row — only if > 0 */}
+                {carryover > 0 && (
+                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:"0.81rem", marginBottom:"6px" }}>
+                    <span style={{ color:"#9b6b8a" }}>Carryover</span>
+                    <span style={{ fontWeight:700, color:"#a67c20" }}>{fmt(carryover)}</span>
+                  </div>
+                )}
+                {/* Total budgeted */}
+                <div style={{ display:"flex", justifyContent:"space-between", fontSize:"0.81rem", marginBottom:"6px" }}>
+                  <span style={{ color:"#9b6b8a" }}>Total budgeted</span>
+                  <span style={{ fontWeight:700, color:"#db2777" }}>{fmt(totalAmt)}</span>
+                </div>
+                {/* Paid so far */}
+                <div style={{ display:"flex", justifyContent:"space-between", fontSize:"0.81rem", marginBottom:"6px" }}>
+                  <span style={{ color:"#9b6b8a" }}>Paid so far ({paidCount}/{periodExpenses.length})</span>
+                  <span style={{ fontWeight:700, color:"#3a6b4e" }}>{fmt(paidAmt)}</span>
+                </div>
+                {/* Remaining — separator line like V2 */}
+                <div style={{ display:"flex", justifyContent:"space-between", fontSize:"0.81rem", paddingTop:"8px", borderTop:"1px solid #fce7f3", fontWeight:700 }}>
+                  <span>Remaining</span>
+                  <span style={{ fontSize:"1.05rem", color: remaining >= 0 ? "#3a6b4e" : "#c24b1a" }}>
+                    {remaining >= 0 ? fmt(remaining) : `-${fmt(Math.abs(remaining))}`}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* ── Progress bar ── */}
+            {totalAmt > 0 && (
+              <div style={{ ...cardStyle, padding:"14px 16px" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", fontSize:"0.83rem", fontWeight:600, marginBottom:"6px" }}>
+                  <span>Expense Progress</span>
+                  <span style={{ color:"#9b6b8a", fontSize:"0.72rem" }}>{fmt(paidAmt)} / {fmt(totalAmt)}</span>
+                </div>
+                <div style={{ height:"7px", background:"#fce7f3", borderRadius:"4px", overflow:"hidden", marginBottom:"6px" }}>
+                  <div style={{ height:"100%", width:`${totalAmt>0?(paidAmt/totalAmt*100):0}%`, background:"#db2777", borderRadius:"4px", transition:`width 0.6s ${transitions.spring}` }} />
+                </div>
+                <div style={{ display:"flex", justifyContent:"space-between", fontSize:"0.67rem", color:"#9b6b8a" }}>
+                  <span>{paidCount} paid ✓</span>
+                  <span>{periodExpenses.length - paidCount} pending · {fmt(totalAmt - paidAmt)}</span>
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>
+
+      <Toast msg={toast} onDone={() => setToast("")} />
     </div>
   );
 }
