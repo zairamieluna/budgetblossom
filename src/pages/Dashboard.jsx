@@ -35,33 +35,40 @@ export default function Dashboard() {
 
   const stats = useMemo(() => {
     if (!rawData) return null;
-    const incomes      = rawData.incomes      ?? [];
-    const expenses     = rawData.expenses     ?? [];
-    const debts        = rawData.debts        ?? [];
-    const jars         = rawData.jars         ?? [];
-    const goals        = rawData.goals        ?? [];
+    const incomes  = rawData.incomes  ?? [];
+    const expenses = rawData.expenses ?? [];
+    const jars     = rawData.jars     ?? [];
+    const goals    = rawData.goals    ?? [];
 
-    const monthlyIncome   = incomes.reduce((s,i)=> {
-      if (i.type==="manual") return s+(Number(i.amount)||0);
-      const weekly = (Number(i.hoursPerWeek)||0)*(Number(i.hourlyRate)||0);
-      return s + (i.frequency==="biweekly"?weekly*2:i.frequency==="weekly"?weekly*4.33:weekly*4.33);
+    // ── Monthly income (fixed multipliers) ──────────────────────────────────
+    const monthlyIncome = incomes.reduce((s, i) => {
+      if (i.type === "manual") return s + (Number(i.amount) || 0);
+      const weekly = (Number(i.hoursPerWeek) || 0) * (Number(i.hourlyRate) || 0);
+      const monthly =
+        i.frequency === "biweekly" ? weekly * 26 / 12 :
+        i.frequency === "weekly"   ? weekly * 52 / 12 :
+        weekly * 4.33;
+      return s + monthly;
     }, 0);
 
-    const monthlyExpenses = expenses.filter(e=>e.recurring).reduce((s,e)=>s+(Number(e.amount)||0),0);
-    const monthlyDebt     = debts.reduce((s,d)=>s+(Number(d.minPayment)||0),0);
-    const totalDebt       = debts.reduce((s,d)=>s+(Number(d.balance)||0),0);
-    const totalSaved      = jars.reduce((s,j)=>s+(Number(j.saved)||0),0);
-    const leftover        = monthlyIncome - monthlyExpenses - monthlyDebt;
+    // ── Recurring expenses only (debt payments already included here) ────────
+    const monthlyExpenses = expenses
+      .filter(e => e.recurring)
+      .reduce((s, e) => s + (Number(e.amount) || 0), 0);
 
-    const goalProgress = goals.map(g=>({
-      label: g.label,
-      pct: Math.min(100, Math.round((Number(g.saved)||0)/(Number(g.target)||1)*100)),
-      saved: Number(g.saved)||0,
-      target: Number(g.target)||0,
-      color: g.color || colors.pink,
+    // ── Leftover (no separate debt subtraction — already in expenses) ────────
+    const leftover   = monthlyIncome - monthlyExpenses;
+    const totalSaved = jars.reduce((s, j) => s + (Number(j.saved) || 0), 0);
+
+    const goalProgress = goals.map(g => ({
+      label:  g.label,
+      pct:    Math.min(100, Math.round((Number(g.saved) || 0) / (Number(g.target) || 1) * 100)),
+      saved:  Number(g.saved)  || 0,
+      target: Number(g.target) || 0,
+      color:  g.color || colors.pink,
     }));
 
-    return { monthlyIncome, monthlyExpenses, monthlyDebt, totalDebt, totalSaved, leftover, goalProgress };
+    return { monthlyIncome, monthlyExpenses, leftover, totalSaved, goalProgress };
   }, [rawData]);
 
   const name = rawData?.profile?.name;
@@ -84,31 +91,36 @@ export default function Dashboard() {
         </div>
 
         {loading && <LoadingSpinner message="Loading…" />}
-        {error   && <SoftCard variant="highlight" style={{ marginBottom:"16px",color:colors.pinkDeep,fontSize:"13px" }}>⚠ {error}</SoftCard>}
+        {error   && (
+          <SoftCard variant="highlight" style={{ marginBottom:"16px",color:colors.pinkDeep,fontSize:"13px" }}>
+            ⚠ {error}
+          </SoftCard>
+        )}
 
         {!loading && stats && (
           <>
             {/* Leftover hero card */}
             <SoftCard variant="highlight" style={{ marginBottom:"16px",textAlign:"center" }} noAnimate>
-              <p style={{ fontSize:"11px",fontWeight:700,color:colors.pinkDeep,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:"4px" }}>
+              <p style={{ fontSize:"11px",fontWeight:700,color:colors.pinkDeep,
+                letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:"4px" }}>
                 Monthly Leftover
               </p>
               <p style={{ fontFamily:typography.fontDisplay,fontSize:"40px",fontWeight:700,
-                color:stats.leftover>=0?colors.pinkDeep:colors.critical,letterSpacing:"-0.03em",lineHeight:1 }}>
+                color:stats.leftover>=0?colors.pinkDeep:colors.critical,
+                letterSpacing:"-0.03em",lineHeight:1 }}>
                 {fmt(stats.leftover)}
               </p>
               <p style={{ fontSize:"12px",color:colors.textMuted,marginTop:"6px" }}>
-                after bills & debt payments
+                after all bills & expenses
               </p>
             </SoftCard>
 
-            {/* Income / Expenses / Debt grid */}
-            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"8px",marginBottom:"16px" }}>
+            {/* Income / Expenses grid */}
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px",marginBottom:"16px" }}>
               {[
-                { label:"Income",   value:fmt(stats.monthlyIncome),   color:colors.gold,     emoji:"💛" },
-                { label:"Bills",    value:fmt(stats.monthlyExpenses),  color:colors.pink,     emoji:"📄" },
-                { label:"Debt",     value:fmt(stats.monthlyDebt),      color:colors.rose,     emoji:"💳" },
-              ].map(({label,value,color,emoji})=>(
+                { label:"Income",   value:fmt(stats.monthlyIncome),   color:colors.gold, emoji:"💛" },
+                { label:"Bills",    value:fmt(stats.monthlyExpenses),  color:colors.pink, emoji:"📄" },
+              ].map(({label,value,color,emoji}) => (
                 <SoftCard key={label} variant="base" padding="14px 12px" noAnimate style={{ textAlign:"center" }}>
                   <div style={{ fontSize:"18px",marginBottom:"4px" }}>{emoji}</div>
                   <div style={{ fontSize:"10px",fontWeight:700,color:colors.textMuted,
@@ -118,26 +130,21 @@ export default function Dashboard() {
               ))}
             </div>
 
-            {/* Total debt + savings */}
-            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px",marginBottom:"16px" }}>
-              <SoftCard variant="base" padding="16px" noAnimate>
-                <div style={{ fontSize:"20px",marginBottom:"6px" }}>💳</div>
-                <div style={{ fontSize:"10px",fontWeight:700,color:colors.textMuted,
-                  letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:"2px" }}>Total Debt</div>
-                <div style={{ fontFamily:typography.fontDisplay,fontSize:"22px",fontWeight:700,
-                  color:colors.pinkDeep,letterSpacing:"-0.02em" }}>{fmt(stats.totalDebt)}</div>
-              </SoftCard>
-              <SoftCard variant="teal" padding="16px" noAnimate>
-                <div style={{ fontSize:"20px",marginBottom:"6px" }}>🫙</div>
-                <div style={{ fontSize:"10px",fontWeight:700,color:colors.tealDeep,
-                  letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:"2px" }}>Total Saved</div>
-                <div style={{ fontFamily:typography.fontDisplay,fontSize:"22px",fontWeight:700,
-                  color:colors.tealDeep,letterSpacing:"-0.02em" }}>{fmt(stats.totalSaved)}</div>
-              </SoftCard>
-            </div>
+            {/* Total saved */}
+            <SoftCard variant="teal" padding="16px" noAnimate style={{ marginBottom:"16px" }}>
+              <div style={{ display:"flex",alignItems:"center",gap:"12px" }}>
+                <div style={{ fontSize:"28px" }}>🫙</div>
+                <div>
+                  <div style={{ fontSize:"10px",fontWeight:700,color:colors.tealDeep,
+                    letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:"2px" }}>Total Saved</div>
+                  <div style={{ fontFamily:typography.fontDisplay,fontSize:"26px",fontWeight:700,
+                    color:colors.tealDeep,letterSpacing:"-0.02em" }}>{fmt(stats.totalSaved)}</div>
+                </div>
+              </div>
+            </SoftCard>
 
             {/* Goals */}
-            {stats.goalProgress.length>0 && (
+            {stats.goalProgress.length > 0 && (
               <div className="fade-up" style={{ animationDelay:"0.1s" }}>
                 <h2 style={{ fontSize:"11px",fontWeight:700,color:colors.textMuted,
                   letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:"12px",
@@ -146,9 +153,10 @@ export default function Dashboard() {
                   <span style={{ flex:1,height:"1px",backgroundColor:colors.border }} />
                 </h2>
                 <div style={{ display:"flex",flexDirection:"column",gap:"10px" }}>
-                  {stats.goalProgress.map(g=>(
+                  {stats.goalProgress.map(g => (
                     <SoftCard key={g.label} variant="base" padding="14px 16px" noAnimate>
-                      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"8px" }}>
+                      <div style={{ display:"flex",justifyContent:"space-between",
+                        alignItems:"center",marginBottom:"8px" }}>
                         <span style={{ fontSize:"13px",fontWeight:600,color:colors.text }}>{g.label}</span>
                         <span style={{ fontSize:"12px",fontWeight:700,color:g.color }}>{g.pct}%</span>
                       </div>
