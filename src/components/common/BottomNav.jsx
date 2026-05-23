@@ -7,6 +7,7 @@ import { colors, typography, radii, transitions } from "../../ui/designTokens";
 const NAV_ITEMS = [
   { id: "dashboard", label: "Home",     emoji: "🏠" },
   { id: "expenses",  label: "Expenses", emoji: "💸" },
+  { id: "income",    label: "Income",   emoji: "💰" },
   { id: "cards",     label: "Cards",    emoji: "💳" },
   { id: "debts",     label: "Debts",    emoji: "📊" },
   { id: "calendar",  label: "Calendar", emoji: "📅" },
