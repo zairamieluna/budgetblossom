@@ -34,7 +34,7 @@ function daysUntil(dateStr) {
 function adaptData(raw, rangeStart, rangeEnd) {
   if (!raw) return { shifts:[], debts:[], expenses:[], subscriptions:[] };
   const incomes      = raw.incomes      ?? [];
-  const rawDebts     = raw.debts        ?? [];
+  const rawDebts     = []; // debts removed from app
   const rawExpenses  = raw.expenses     ?? [];
   const installments = raw.installments ?? [];
 
