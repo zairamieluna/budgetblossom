@@ -4,22 +4,22 @@
  */
 import { useState } from "react";
 import "./styles/globals.css";
-import BottomNav  from "./components/common/BottomNav";
-import Dashboard  from "./pages/Dashboard";
-import Expenses   from "./pages/Expenses";
-import Cards      from "./pages/Cards";
-import Jars       from "./pages/Jars";
-import Calendar   from "./pages/Calendar";
-import Income     from "./pages/Income";
-import Settings   from "./pages/Settings";
+import BottomNav from "./components/common/BottomNav";
+import Dashboard from "./pages/Dashboard";
+import Expenses  from "./pages/Expenses";
+import Income    from "./pages/Income";
+import Cards     from "./pages/Cards";
+import Savings   from "./pages/Savings";
+import Calendar  from "./pages/Calendar";
+import Settings  from "./pages/Settings";
 
 const PAGES = {
   dashboard: Dashboard,
   expenses:  Expenses,
-  cards:     Cards,
-  jars:      Jars,
-  calendar:  Calendar,
   income:    Income,
+  cards:     Cards,
+  savings:   Savings,
+  calendar:  Calendar,
   settings:  Settings,
 };
 
