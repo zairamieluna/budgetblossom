@@ -2,14 +2,13 @@
  * BottomNav.jsx
  * Mobile-first bottom navigation bar.
  */
-
 import { colors, typography, radii, transitions } from "../../ui/designTokens";
 
 const NAV_ITEMS = [
   { id: "dashboard", label: "Home",     emoji: "🏠" },
   { id: "expenses",  label: "Expenses", emoji: "💸" },
-  { id: "debts",     label: "Debts",    emoji: "💳" },
-  { id: "jars",      label: "Jars",     emoji: "🫙" },
+  { id: "cards",     label: "Cards",    emoji: "💳" },
+  { id: "debts",     label: "Debts",    emoji: "📊" },
   { id: "calendar",  label: "Calendar", emoji: "📅" },
   { id: "settings",  label: "Settings", emoji: "⚙️"  },
 ];
@@ -41,7 +40,7 @@ export default function BottomNav({ activePage, onNavigate }) {
               flexDirection:  "column",
               alignItems:     "center",
               gap:            "3px",
-              padding:        "4px 10px",
+              padding:        "4px 8px",
               borderRadius:   radii.lg,
               cursor:         "pointer",
               transition:     `all ${transitions.base}`,
@@ -50,7 +49,7 @@ export default function BottomNav({ activePage, onNavigate }) {
               color:          isActive ? colors.pink : colors.textMuted,
               border:         "none",
               background:     isActive ? colors.pinkPale : "transparent",
-              minWidth:       "48px",
+              minWidth:       "44px",
               letterSpacing:  "0.04em",
               textTransform:  "uppercase",
             }}
