@@ -1,11 +1,10 @@
 /**
  * App.jsx
  * Root app component with bottom-nav page routing.
- * Preserves all existing Supabase connections.
  */
 
 import { useState } from "react";
-import "../styles/globals.css";
+import "./styles/globals.css";
 
 import BottomNav  from "./components/common/BottomNav";
 import Dashboard  from "./pages/Dashboard";
