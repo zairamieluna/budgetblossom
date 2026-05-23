@@ -7,7 +7,6 @@ import "./styles/globals.css";
 import BottomNav  from "./components/common/BottomNav";
 import Dashboard  from "./pages/Dashboard";
 import Expenses   from "./pages/Expenses";
-import Debts      from "./pages/Debts";
 import Cards      from "./pages/Cards";
 import Jars       from "./pages/Jars";
 import Calendar   from "./pages/Calendar";
@@ -17,7 +16,6 @@ import Settings   from "./pages/Settings";
 const PAGES = {
   dashboard: Dashboard,
   expenses:  Expenses,
-  debts:     Debts,
   cards:     Cards,
   jars:      Jars,
   calendar:  Calendar,
