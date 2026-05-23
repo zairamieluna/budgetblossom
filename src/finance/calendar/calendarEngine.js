@@ -3,7 +3,7 @@
  * Pure function calendar engine — generates unified financial calendar events.
  */
 
-const { isStatHoliday, getOntarioStatHolidays } = require("./canadaHolidays");
+import { isStatHoliday, getOntarioStatHolidays } from "./canadaHolidays";
 
 const EVENT_COLORS = {
   income:       "#e8a840",
@@ -168,5 +168,5 @@ function _advance(date, freq) {
   return d;
 }
 
-module.exports = { generateCalendarEvents, eventsFromShifts, eventsFromDebts,
+export { generateCalendarEvents, eventsFromShifts, eventsFromDebts,
   eventsFromExpenses, eventsFromSubscriptions, eventsFromStatHolidays, EVENT_COLORS };
