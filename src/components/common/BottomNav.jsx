@@ -1,13 +1,6 @@
 /**
  * BottomNav.jsx
  * Mobile-first bottom navigation bar.
- *
- * Fixes:
- *  - Fixed height (64px) so it's always anchored to the bottom
- *  - env(safe-area-inset-bottom) padding for iPhone home bar
- *  - Tighter button sizing so 7 items fit comfortably on narrow screens
- *  - minWidth reduced so nothing wraps or overflows
- *  - All theme CSS vars retained from previous version
  */
 import { typography, transitions } from "../../ui/designTokens";
 
@@ -24,22 +17,21 @@ const NAV_ITEMS = [
 export default function BottomNav({ activePage, onNavigate }) {
   return (
     <nav style={{
-      position:         "fixed",
-      bottom:           0,
-      left:             0,
-      right:            0,
-      height:           "64px",
-      backgroundColor:  "var(--nav-bg)",
-      borderTop:        "1.5px solid var(--nav-border)",
-      boxShadow:        "var(--nav-shadow)",
-      display:          "flex",
-      justifyContent:   "space-around",
-      alignItems:       "center",
-      // Safe area inset for iPhone home bar — no content hidden behind it
-      paddingBottom:    "env(safe-area-inset-bottom)",
-      paddingLeft:      "env(safe-area-inset-left)",
-      paddingRight:     "env(safe-area-inset-right)",
-      zIndex:           400,
+      position:        "fixed",
+      bottom:          0,
+      left:            0,
+      right:           0,
+      height:          "64px",
+      backgroundColor: "var(--nav-bg)",
+      borderTop:       "1.5px solid var(--nav-border)",
+      boxShadow:       "var(--nav-shadow)",
+      display:         "flex",
+      justifyContent:  "space-around",
+      alignItems:      "center",
+      paddingBottom:   "env(safe-area-inset-bottom)",
+      paddingLeft:     "env(safe-area-inset-left)",
+      paddingRight:    "env(safe-area-inset-right)",
+      zIndex:          400,
     }}>
       {NAV_ITEMS.map((item) => {
         const isActive = activePage === item.id;
@@ -53,7 +45,6 @@ export default function BottomNav({ activePage, onNavigate }) {
               alignItems:     "center",
               justifyContent: "center",
               gap:            "2px",
-              // flex:1 so all items share width equally regardless of label length
               flex:           "1 1 0",
               height:         "100%",
               padding:        "6px 2px 4px",
@@ -67,7 +58,6 @@ export default function BottomNav({ activePage, onNavigate }) {
               letterSpacing:  "0.04em",
               textTransform:  "uppercase",
               transition:     `all ${transitions.base}`,
-              // Prevent text overflow on very narrow screens
               overflow:       "hidden",
               whiteSpace:     "nowrap",
             }}
