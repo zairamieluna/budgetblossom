@@ -9,7 +9,7 @@ const NAV_ITEMS = [
   { id: "expenses",  label: "Expenses", emoji: "💸" },
   { id: "income",    label: "Income",   emoji: "💰" },
   { id: "cards",     label: "Cards",    emoji: "💳" },
-  { id: "debts",     label: "Debts",    emoji: "📊" },
+  { id: "savings",   label: "Savings",  emoji: "🫙" },
   { id: "calendar",  label: "Calendar", emoji: "📅" },
   { id: "settings",  label: "Settings", emoji: "⚙️" },
 ];
