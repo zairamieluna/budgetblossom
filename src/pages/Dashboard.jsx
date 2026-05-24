@@ -41,6 +41,82 @@ function currentPeriodIdx() {
   return idx >= 0 ? idx : Math.max(0, PERIODS.findIndex(p => p.s > now) - 1);
 }
 
+// ── Mood Tracker ─────────────────────────────────────────────────────────────
+const MOODS = [
+  { emoji: "😊", label: "Happy",   value: "happy"   },
+  { emoji: "😐", label: "Okay",    value: "okay"    },
+  { emoji: "😔", label: "Sad",     value: "sad"     },
+  { emoji: "😤", label: "Stressed",value: "stressed"},
+  { emoji: "🥲", label: "Meh",     value: "meh"     },
+];
+
+function MoodTracker({ rawData, onSave, saving }) {
+  const todayStr = new Date().toISOString().split("T")[0];
+  const existing = rawData?.moods?.[todayStr];
+  const [selected, setSelected] = useState(existing ?? null);
+  const [saved,    setSaved]    = useState(!!existing);
+
+  async function pickMood(value) {
+    setSelected(value);
+    setSaved(false);
+    const updated = {
+      ...rawData,
+      moods: { ...(rawData?.moods ?? {}), [todayStr]: value },
+    };
+    await onSave(updated);
+    setSaved(true);
+  }
+
+  const currentMood = MOODS.find(m => m.value === selected);
+
+  return (
+    <SoftCard variant="base" noAnimate style={{ marginBottom: "16px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
+        <div>
+          <div style={{ fontSize: "11px", fontWeight: 700, color: colors.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "2px" }}>
+            Today's Mood
+          </div>
+          <div style={{ fontSize: "12px", color: colors.textMuted }}>
+            {saved && currentMood ? `Feeling ${currentMood.label} today 🌸` : "How are you feeling?"}
+          </div>
+        </div>
+        {saved && currentMood && (
+          <div style={{ fontSize: "28px", lineHeight: 1 }}>{currentMood.emoji}</div>
+        )}
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: "6px" }}>
+        {MOODS.map(m => (
+          <button
+            key={m.value}
+            onClick={() => pickMood(m.value)}
+            disabled={saving}
+            title={m.label}
+            style={{
+              flex: 1,
+              padding: "10px 4px",
+              borderRadius: "10px",
+              border: `2px solid ${selected === m.value ? colors.pinkDeep : colors.border}`,
+              background: selected === m.value ? colors.pinkPale : colors.bgDeep,
+              cursor: saving ? "default" : "pointer",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "4px",
+              transition: `all ${transitions.base}`,
+              transform: selected === m.value ? "scale(1.08)" : "scale(1)",
+            }}
+          >
+            <span style={{ fontSize: "22px", lineHeight: 1 }}>{m.emoji}</span>
+            <span style={{ fontSize: "9px", fontWeight: 700, color: selected === m.value ? colors.pinkDeep : colors.textMuted, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+              {m.label}
+            </span>
+          </button>
+        ))}
+      </div>
+    </SoftCard>
+  );
+}
+
 // ── AI Coach ──────────────────────────────────────────────────────────────────
 function AICoach({ rawData, periodIncome, periodExpenses }) {
   const [messages, setMessages] = useState([
@@ -65,7 +141,6 @@ function AICoach({ rawData, periodIncome, periodExpenses }) {
 
     const savings = rawData?.savings ?? [];
     const cards   = rawData?.cards   ?? [];
-    const goals   = rawData?.goals   ?? [];
     const remaining = periodIncome - periodExpenses;
 
     const context = `
@@ -76,7 +151,6 @@ User's financial snapshot (current pay period — no estimates, no cross-period 
 - Remaining balance: $${remaining.toFixed(2)} CAD
 - Savings buckets: ${savings.map(s => `${s.name} ($${s.saved} saved of $${s.target} goal, $${s.monthly}/mo)`).join(", ") || "none"}
 - Credit cards: ${cards.map(c => `${c.label} balance $${c.balance} limit $${c.limit}`).join(", ") || "none"}
-- Goals: ${goals.map(g => `${g.label} ($${g.saved}/$${g.target})`).join(", ") || "none"}
 
 IMPORTANT: Only use data from the current period. Do not estimate or assume any additional income.
 Be warm, concise, and practical. Use CAD dollars. Give actionable advice.
@@ -178,10 +252,26 @@ Be warm, concise, and practical. Use CAD dollars. Give actionable advice.
 
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const [rawData,  setRawData]  = useState(null);
-  const [loading,  setLoading]  = useState(true);
-  const [error,    setError]    = useState(null);
+  const [rawData,   setRawData]   = useState(null);
+  const [loading,   setLoading]   = useState(true);
+  const [saving,    setSaving]    = useState(false);
+  const [error,     setError]     = useState(null);
   const [periodIdx, setPeriodIdx] = useState(currentPeriodIdx);
+
+  async function saveData(updated) {
+    setSaving(true);
+    try {
+      const { data: row } = await supabase.from("user_data").select("id").limit(1).single();
+      await supabase.from("user_data")
+        .update({ data: { budgetsbloom: JSON.stringify(updated) } })
+        .eq("id", row.id);
+      setRawData(updated);
+    } catch (e) {
+      console.error("Save failed", e);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -210,7 +300,6 @@ export default function Dashboard() {
 
     const expenses = rawData.expenses ?? [];
     const savings  = rawData.savings  ?? [];
-    const goals    = rawData.goals    ?? [];
     const sent     = rawData.sent     ?? {};
 
     // ── INCOME: only from sent entries for THIS period ───────────────────────
@@ -241,14 +330,6 @@ export default function Dashboard() {
       pct:     b.target > 0 ? Math.min(100, Math.round((Number(b.saved) || 0) / Number(b.target) * 100)) : null,
     }));
 
-    const goalProgress = goals.map(g => ({
-      label:  g.label,
-      pct:    Math.min(100, Math.round((Number(g.saved) || 0) / (Number(g.target) || 1) * 100)),
-      saved:  Number(g.saved)  || 0,
-      target: Number(g.target) || 0,
-      color:  g.color || colors.pink,
-    }));
-
     return {
       periodIncome,
       periodExpensesTotal,
@@ -258,7 +339,6 @@ export default function Dashboard() {
       remaining,
       totalSaved,
       savingsBuckets,
-      goalProgress,
       sentCount: periodSent.length,
     };
   }, [rawData, period]);
@@ -282,6 +362,11 @@ export default function Dashboard() {
             {name ? `Hey ${name}! 🌸` : "Dashboard"}
           </h1>
         </div>
+
+        {/* Mood Tracker */}
+        {!loading && rawData && (
+          <MoodTracker rawData={rawData} onSave={saveData} saving={saving} />
+        )}
 
         {/* Period navigator */}
         <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "16px" }}>
@@ -425,31 +510,6 @@ export default function Dashboard() {
                         </>
                       )}
                       {b.pct === null && <div style={{ fontSize: "11px", color: colors.textMuted }}>{fmt(b.saved)} saved so far</div>}
-                    </SoftCard>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Savings goals */}
-            {stats.goalProgress.length > 0 && (
-              <div className="fade-up" style={{ animationDelay: "0.1s", marginBottom: "16px" }}>
-                <h2 style={{ fontSize: "11px", fontWeight: 700, color: colors.textMuted, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
-                  Savings Goals
-                  <span style={{ flex: 1, height: "1px", backgroundColor: colors.border }} />
-                </h2>
-                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                  {stats.goalProgress.map(g => (
-                    <SoftCard key={g.label} variant="base" padding="14px 16px" noAnimate>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                        <span style={{ fontSize: "13px", fontWeight: 600, color: colors.text }}>{g.label}</span>
-                        <span style={{ fontSize: "12px", fontWeight: 700, color: g.color }}>{g.pct}%</span>
-                      </div>
-                      <ProgressBar pct={g.pct} color={g.color} height="6px" animDelay="0.3s" />
-                      <div style={{ display: "flex", justifyContent: "space-between", marginTop: "4px" }}>
-                        <span style={{ fontSize: "10px", color: colors.textMuted }}>{fmt(g.saved)} saved</span>
-                        <span style={{ fontSize: "10px", color: colors.textMuted }}>goal: {fmt(g.target)}</span>
-                      </div>
                     </SoftCard>
                   ))}
                 </div>
