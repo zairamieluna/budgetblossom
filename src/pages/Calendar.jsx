@@ -1,10 +1,7 @@
 /**
  * Calendar.jsx
  * Monthly financial calendar — connected to Supabase user_data.
- *
- * FIX: Income events now come ONLY from rawData.sent (confirmed Budget Pool entries).
- * Removed manual/recurring salary projection that was auto-generating $2,600 income.
- * Rule: manual input = source of truth. No estimates, no projections, no assumptions.
+ * ADDED: Mood emoji shown on each day cell from rawData.moods[dateStr].
  */
 
 import { useState, useMemo, useEffect } from "react";
@@ -25,6 +22,15 @@ const TYPE_META = {
   holiday:      { color: colors.textMuted, bg: colors.bgDeep,    border: colors.border, label: "Holiday", emoji: "🍁" },
 };
 
+// Mood map — matches Dashboard MOODS array
+const MOOD_EMOJI = {
+  happy:    "😊",
+  okay:     "😐",
+  sad:      "😔",
+  stressed: "😤",
+  meh:      "🥲",
+};
+
 const fmt = n => new Intl.NumberFormat("en-CA",{style:"currency",currency:"CAD",maximumFractionDigits:0}).format(n);
 
 function toLocalDateStr(d) {
@@ -37,9 +43,6 @@ function daysUntil(dateStr) {
 }
 
 // ── adaptData ─────────────────────────────────────────────────────────────────
-// FIX: Income comes ONLY from rawData.sent (confirmed Budget Pool entries).
-// Shift dailyShifts (already worked, already confirmed) are still shown.
-// Manual income projections (type:"manual", amount:2600) are REMOVED.
 function adaptData(raw, rangeStart, rangeEnd) {
   if (!raw) return { shifts:[], debts:[], expenses:[], subscriptions:[] };
 
@@ -47,16 +50,11 @@ function adaptData(raw, rangeStart, rangeEnd) {
   const installments = raw.installments ?? [];
   const sent         = raw.sent         ?? {};
 
-  // ── INCOME: only from confirmed Budget Pool (rawData.sent) ────────────────
-  // Each entry in sent[periodKey] has { src, amt, date, person }
-  // We show these as income events on their actual sent date.
   const shifts = [];
-
   for (const [periodKey, entries] of Object.entries(sent)) {
     if (!Array.isArray(entries)) continue;
     for (const entry of entries) {
       if (!entry.date || !entry.amt) continue;
-      // Only include if the date falls within our calendar range
       if (entry.date < rangeStart || entry.date > rangeEnd) continue;
       shifts.push({
         id:     `sent-${periodKey}-${entry.date}-${entry.src}`,
@@ -67,7 +65,6 @@ function adaptData(raw, rangeStart, rangeEnd) {
     }
   }
 
-  // ── EXPENSES: from rawData.expenses (user's actual bills) ─────────────────
   const expenses = [
     ...rawExpenses
       .filter(e => e.dueDay || e.dueDate || e.due || e.date)
@@ -93,8 +90,6 @@ function adaptData(raw, rangeStart, rangeEnd) {
         };
       })
       .filter(Boolean),
-
-    // Installments
     ...installments
       .filter(i => (i.monthly || i.amt) && (i.startDate || i.start))
       .map(i => ({
@@ -112,7 +107,7 @@ function adaptData(raw, rangeStart, rangeEnd) {
   return { shifts, debts: [], expenses, subscriptions: [] };
 }
 
-// ── Sub-components (unchanged) ────────────────────────────────────────────────
+// ── Sub-components ────────────────────────────────────────────────────────────
 function EventPill({ event, compact=false }) {
   const meta = TYPE_META[event.type] || TYPE_META.bill;
   return (
@@ -131,26 +126,33 @@ function EventPill({ event, compact=false }) {
   );
 }
 
-function DayCell({ date, isCurrentMonth, isToday, events, isSelected, onSelect }) {
+// ── DayCell — now accepts moodEmoji ──────────────────────────────────────────
+function DayCell({ date, isCurrentMonth, isToday, events, isSelected, onSelect, moodEmoji }) {
   const dateStr   = toLocalDateStr(date);
   const hasEvents = events.length > 0;
   const visible   = events.slice(0, 2);
   const overflow  = events.length - 2;
   return (
-    <div onClick={() => hasEvents && onSelect(dateStr)}
+    <div onClick={() => (hasEvents || moodEmoji) && onSelect(dateStr)}
       style={{ minHeight:"80px", padding:"6px", borderRadius:radii.lg,
         backgroundColor: isSelected?"#fff0f4":isToday?"#fff4f7":isCurrentMonth?colors.bgCard:"#faf4f6",
         border:`1.5px solid ${isSelected?colors.pink:isToday?colors.pinkLight:colors.borderSoft}`,
-        cursor: hasEvents?"pointer":"default",
-        opacity: isCurrentMonth?1:0.4,
+        cursor: (hasEvents || moodEmoji) ? "pointer" : "default",
+        opacity: isCurrentMonth ? 1 : 0.4,
         transition:`all ${transitions.base}`,
         display:"flex", flexDirection:"column", gap:"3px",
         boxShadow: isToday?`0 0 0 2px ${colors.pinkPale}`:isSelected?"0 2px 12px rgba(232,112,138,0.15)":"none",
       }}>
-      <span style={{ fontSize:"11px", fontWeight:isToday?700:400, lineHeight:1,
-        color: isToday?colors.pinkDeep:isCurrentMonth?colors.textSoft:colors.textFaint }}>
-        {date.getDate()}
-      </span>
+      {/* Day number + mood emoji on same row */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", lineHeight:1 }}>
+        <span style={{ fontSize:"11px", fontWeight:isToday?700:400,
+          color: isToday?colors.pinkDeep:isCurrentMonth?colors.textSoft:colors.textFaint }}>
+          {date.getDate()}
+        </span>
+        {moodEmoji && isCurrentMonth && (
+          <span style={{ fontSize:"12px", lineHeight:1 }} title="Mood logged">{moodEmoji}</span>
+        )}
+      </div>
       {visible.map(ev => <EventPill key={ev.id} event={ev} compact />)}
       {overflow > 0 && <span style={{ fontSize:"9px", color:colors.textMuted, paddingLeft:"4px" }}>+{overflow}</span>}
     </div>
@@ -182,6 +184,8 @@ export default function Calendar() {
     }
     load(); return ()=>{cancelled=true;};
   }, []);
+
+  const moods = useMemo(() => rawData?.moods ?? {}, [rawData]);
 
   const { rangeStart, rangeEnd } = useMemo(() => {
     const s = new Date(viewYear, viewMonth-1, 1);
@@ -218,6 +222,7 @@ export default function Calendar() {
 
   const todayStr       = toLocalDateStr(today);
   const selectedEvents = selected ? (eventsByDate[selected]||[]) : [];
+  const selectedMood   = selected ? moods[selected] : null;
 
   const upcoming = useMemo(() => allEvents
     .filter(e => e.date >= todayStr && e.type !== "holiday")
@@ -227,6 +232,12 @@ export default function Calendar() {
   function prevMonth() { if(viewMonth===0){setViewYear(y=>y-1);setViewMonth(11);}else setViewMonth(m=>m-1); }
   function nextMonth() { if(viewMonth===11){setViewYear(y=>y+1);setViewMonth(0);}else setViewMonth(m=>m+1); }
 
+  // Count moods logged this month for the summary pill
+  const moodCountThisMonth = useMemo(() => {
+    const prefix = `${viewYear}-${String(viewMonth+1).padStart(2,"0")}`;
+    return Object.keys(moods).filter(k => k.startsWith(prefix)).length;
+  }, [moods, viewYear, viewMonth]);
+
   return (
     <div style={{ minHeight:"100vh", backgroundColor:colors.bg, fontFamily:typography.fontBody,
       color:colors.text, paddingBottom:"80px" }}>
@@ -235,8 +246,16 @@ export default function Calendar() {
         {/* Header */}
         <div className="fade-up" style={{ padding:"40px 0 20px" }}>
           <p style={{ fontSize:"11px", fontWeight:700, color:colors.textMuted, letterSpacing:"0.12em", textTransform:"uppercase", marginBottom:"4px" }}>Financial</p>
-          <h1 style={{ fontFamily:typography.fontDisplay, fontSize:"30px", fontWeight:700,
-            color:colors.text, letterSpacing:"-0.03em", lineHeight:1.1 }}>Calendar</h1>
+          <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between" }}>
+            <h1 style={{ fontFamily:typography.fontDisplay, fontSize:"30px", fontWeight:700,
+              color:colors.text, letterSpacing:"-0.03em", lineHeight:1.1 }}>Calendar</h1>
+            {moodCountThisMonth > 0 && (
+              <span style={{ fontSize:"11px", color:colors.textMuted, background:colors.pinkPale,
+                border:`1px solid ${colors.border}`, borderRadius:"99px", padding:"3px 10px", fontWeight:600 }}>
+                {moodCountThisMonth} mood{moodCountThisMonth !== 1 ? "s" : ""} logged
+              </span>
+            )}
+          </div>
         </div>
 
         {loading && <LoadingSpinner message="Loading calendar…" />}
@@ -273,14 +292,19 @@ export default function Calendar() {
                 ))}
               </div>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:"3px" }}>
-                {gridDays.map((date,i)=>(
-                  <DayCell key={i} date={date}
-                    isCurrentMonth={date.getMonth()===viewMonth}
-                    isToday={toLocalDateStr(date)===todayStr}
-                    isSelected={toLocalDateStr(date)===selected}
-                    events={eventsByDate[toLocalDateStr(date)]||[]}
-                    onSelect={setSelected} />
-                ))}
+                {gridDays.map((date,i) => {
+                  const ds = toLocalDateStr(date);
+                  return (
+                    <DayCell key={i} date={date}
+                      isCurrentMonth={date.getMonth()===viewMonth}
+                      isToday={ds===todayStr}
+                      isSelected={ds===selected}
+                      events={eventsByDate[ds]||[]}
+                      onSelect={setSelected}
+                      moodEmoji={moods[ds] ? MOOD_EMOJI[moods[ds]] : null}
+                    />
+                  );
+                })}
               </div>
 
               {/* Legend */}
@@ -293,11 +317,15 @@ export default function Calendar() {
                     <span style={{ fontSize:"10px", color:colors.textMuted, fontWeight:500 }}>{meta.label}</span>
                   </div>
                 ))}
+                <div style={{ display:"flex", alignItems:"center", gap:"4px" }}>
+                  <span style={{ fontSize:"10px" }}>😊</span>
+                  <span style={{ fontSize:"10px", color:colors.textMuted, fontWeight:500 }}>Mood</span>
+                </div>
               </div>
             </SoftCard>
 
             {/* Selected day detail */}
-            {selected && selectedEvents.length>0 && (
+            {selected && (selectedEvents.length > 0 || selectedMood) && (
               <SoftCard variant="soft" style={{ marginBottom:"16px" }} noAnimate>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"12px" }}>
                   <span style={{ fontSize:"13px", fontWeight:600, color:colors.textSoft }}>
@@ -308,6 +336,23 @@ export default function Calendar() {
                     style={{ background:"none", border:"none", color:colors.textMuted,
                       cursor:"pointer", fontSize:"18px", lineHeight:1, padding:"0 4px" }}>×</button>
                 </div>
+
+                {/* Mood row if logged */}
+                {selectedMood && (
+                  <div style={{ display:"flex", alignItems:"center", gap:"12px",
+                    padding:"10px 14px", borderRadius:radii.lg, marginBottom: selectedEvents.length > 0 ? "8px" : 0,
+                    backgroundColor: colors.pinkPale, border:`1px solid ${colors.border}` }}>
+                    <span style={{ fontSize:"24px" }}>{MOOD_EMOJI[selectedMood]}</span>
+                    <div>
+                      <div style={{ fontSize:"13px", fontWeight:600, color:colors.text, textTransform:"capitalize" }}>
+                        Feeling {selectedMood}
+                      </div>
+                      <div style={{ fontSize:"10px", color:colors.textMuted, fontWeight:600,
+                        textTransform:"uppercase", letterSpacing:"0.06em" }}>Mood logged</div>
+                    </div>
+                  </div>
+                )}
+
                 <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
                   {selectedEvents.map(ev=>{
                     const meta = TYPE_META[ev.type]||TYPE_META.bill;
