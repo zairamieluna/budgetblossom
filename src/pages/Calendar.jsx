@@ -2,6 +2,7 @@
  * Calendar.jsx
  * Monthly financial calendar — connected to Supabase user_data.
  * ADDED: Mood emoji shown on each day cell from rawData.moods[dateStr].
+ * ADDED: Custom event / reminder section with add + delete support.
  */
 
 import { useState, useMemo, useEffect } from "react";
@@ -15,11 +16,14 @@ const MONTH_NAMES = ["January","February","March","April","May","June","July","A
 const DAY_LABELS  = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 
 const TYPE_META = {
-  income:       { color: colors.gold,      bg: "#fef6e4",        border: "#c0781040", label: "Income",  emoji: "💛" },
-  debt:         { color: colors.rose,      bg: "#fdedf1",        border: "#f0608040", label: "Debt",    emoji: "💳" },
-  bill:         { color: colors.pink,      bg: colors.pinkPale,  border: "#e8708a40", label: "Bill",    emoji: "📄" },
-  subscription: { color: colors.mauve,     bg: colors.mauvePale, border: "#c890b840", label: "Sub",     emoji: "🔄" },
-  holiday:      { color: colors.textMuted, bg: colors.bgDeep,    border: colors.border, label: "Holiday", emoji: "🍁" },
+  income:       { color: colors.gold,      bg: "#fef6e4",        border: "#c0781040", label: "Income",   emoji: "💛" },
+  debt:         { color: colors.rose,      bg: "#fdedf1",        border: "#f0608040", label: "Debt",     emoji: "💳" },
+  bill:         { color: colors.pink,      bg: colors.pinkPale,  border: "#e8708a40", label: "Bill",     emoji: "📄" },
+  subscription: { color: colors.mauve,     bg: colors.mauvePale, border: "#c890b840", label: "Sub",      emoji: "🔄" },
+  holiday:      { color: colors.textMuted, bg: colors.bgDeep,    border: colors.border, label: "Holiday",emoji: "🍁" },
+  // ── custom types ──
+  event:        { color: "#993356",        bg: "#fdedf1",        border: "#f0608040", label: "Event",    emoji: "📅" },
+  reminder:     { color: "#185FA5",        bg: "#E6F1FB",        border: "#378ADD40", label: "Reminder", emoji: "🔔" },
 };
 
 // Mood map — matches Dashboard MOODS array
@@ -126,7 +130,7 @@ function EventPill({ event, compact=false }) {
   );
 }
 
-// ── DayCell — now accepts moodEmoji ──────────────────────────────────────────
+// ── DayCell ───────────────────────────────────────────────────────────────────
 function DayCell({ date, isCurrentMonth, isToday, events, isSelected, onSelect, moodEmoji }) {
   const dateStr   = toLocalDateStr(date);
   const hasEvents = events.length > 0;
@@ -143,7 +147,6 @@ function DayCell({ date, isCurrentMonth, isToday, events, isSelected, onSelect, 
         display:"flex", flexDirection:"column", gap:"3px",
         boxShadow: isToday?`0 0 0 2px ${colors.pinkPale}`:isSelected?"0 2px 12px rgba(232,112,138,0.15)":"none",
       }}>
-      {/* Day number + mood emoji on same row */}
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", lineHeight:1 }}>
         <span style={{ fontSize:"11px", fontWeight:isToday?700:400,
           color: isToday?colors.pinkDeep:isCurrentMonth?colors.textSoft:colors.textFaint }}>
@@ -159,15 +162,150 @@ function DayCell({ date, isCurrentMonth, isToday, events, isSelected, onSelect, 
   );
 }
 
+// ── AddEntrySection ───────────────────────────────────────────────────────────
+function AddEntrySection({ entries, onAdd, onDelete, today }) {
+  const [type,  setType]  = useState("event");
+  const [title, setTitle] = useState("");
+  const [date,  setDate]  = useState(toLocalDateStr(today));
+  const [time,  setTime]  = useState("");
+  const [amt,   setAmt]   = useState("");
+
+  const inputStyle = {
+    width:"100%", padding:"8px 10px", borderRadius:radii.md,
+    border:`1px solid ${colors.border}`, backgroundColor:colors.bgWarm,
+    color:colors.text, fontSize:"13px", fontFamily:"inherit", outline:"none",
+  };
+
+  function handleAdd() {
+    if (!title.trim() || !date) return;
+    onAdd({
+      id:     `custom-${Date.now()}`,
+      type,
+      title:  title.trim(),
+      date,
+      time,
+      amount: amt ? parseFloat(amt.replace(/[^0-9.]/g, "")) || 0 : 0,
+    });
+    setTitle("");
+    setAmt("");
+    setTime("");
+  }
+
+  return (
+    <SoftCard variant="base" style={{ marginBottom:"16px" }} noAnimate>
+
+      {/* Section label */}
+      <p style={{ fontSize:"11px", fontWeight:700, color:colors.textMuted,
+        letterSpacing:"0.12em", textTransform:"uppercase", marginBottom:"12px",
+        display:"flex", alignItems:"center", gap:"8px" }}>
+        Add to calendar
+        <span style={{ flex:1, height:"1px", backgroundColor:colors.borderSoft }} />
+      </p>
+
+      {/* Type toggle */}
+      <div style={{ display:"flex", gap:"6px", marginBottom:"14px" }}>
+        {["event","reminder"].map(t => {
+          const active = type === t;
+          const isEvent = t === "event";
+          return (
+            <button key={t} onClick={() => setType(t)}
+              style={{
+                flex:1, padding:"7px 0", borderRadius:radii.md, cursor:"pointer",
+                border:`1.5px solid ${active ? (isEvent?"#f06080":"#378ADD") : colors.border}`,
+                backgroundColor: active ? (isEvent?"#fdedf1":"#E6F1FB") : colors.bgCard,
+                color: active ? (isEvent?"#993356":"#0C447C") : colors.textMuted,
+                fontWeight:600, fontSize:"13px",
+                display:"flex", alignItems:"center", justifyContent:"center", gap:"6px",
+                transition:`all ${transitions.base}`,
+              }}>
+              {isEvent ? "📅" : "🔔"} {t.charAt(0).toUpperCase()+t.slice(1)}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Title */}
+      <div style={{ marginBottom:"10px" }}>
+        <input
+          value={title}
+          onChange={e => setTitle(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && handleAdd()}
+          placeholder={type === "event" ? "Event title, e.g. Pay rent" : "Reminder note, e.g. Call insurance"}
+          style={inputStyle}
+        />
+      </div>
+
+      {/* Date + Time */}
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px", marginBottom:"10px" }}>
+        <input type="date" value={date} onChange={e => setDate(e.target.value)} style={inputStyle} />
+        <input type="time" value={time} onChange={e => setTime(e.target.value)} style={inputStyle} />
+      </div>
+
+      {/* Amount — events only */}
+      {type === "event" && (
+        <div style={{ marginBottom:"10px" }}>
+          <input
+            value={amt}
+            onChange={e => setAmt(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && handleAdd()}
+            placeholder="Amount (optional), e.g. $120"
+            style={inputStyle}
+          />
+        </div>
+      )}
+
+      {/* Add button */}
+      <button onClick={handleAdd}
+        style={{ width:"100%", padding:"9px", borderRadius:radii.md, cursor:"pointer",
+          border:`1.5px solid ${colors.border}`, backgroundColor:colors.bgWarm,
+          color:colors.textSoft, fontSize:"13px", fontWeight:600,
+          display:"flex", alignItems:"center", justifyContent:"center", gap:"6px",
+          transition:`all ${transitions.base}` }}>
+        + Add {type}
+      </button>
+
+      {/* Saved entries list */}
+      {entries.length > 0 && (
+        <div style={{ marginTop:"14px", display:"flex", flexDirection:"column", gap:"7px",
+          paddingTop:"12px", borderTop:`1px solid ${colors.borderSoft}` }}>
+          {entries.map(ev => {
+            const meta = TYPE_META[ev.type] || TYPE_META.event;
+            return (
+              <div key={ev.id} style={{ display:"flex", alignItems:"center", gap:"10px",
+                padding:"9px 12px", borderRadius:radii.md,
+                backgroundColor:meta.bg, border:`1px solid ${meta.border}` }}>
+                <span style={{ fontSize:"16px", flexShrink:0 }}>{meta.emoji}</span>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:"13px", fontWeight:600, color:colors.text }}>
+                    {ev.title}{ev.amount > 0 ? ` · ${fmt(ev.amount)}` : ""}
+                  </div>
+                  <div style={{ fontSize:"11px", color:meta.color, fontWeight:500, marginTop:"1px" }}>
+                    {new Date(ev.date+"T12:00:00").toLocaleDateString("en-CA",{month:"short",day:"numeric"})}
+                    {ev.time ? ` · ${ev.time}` : ""} · {meta.label}
+                  </div>
+                </div>
+                <button onClick={() => onDelete(ev.id)}
+                  style={{ background:"none", border:"none", color:colors.textMuted,
+                    cursor:"pointer", fontSize:"18px", lineHeight:1, padding:"0 4px" }}>×</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </SoftCard>
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function Calendar() {
   const today = new Date();
-  const [viewYear,  setViewYear]  = useState(today.getFullYear());
-  const [viewMonth, setViewMonth] = useState(today.getMonth());
-  const [selected,  setSelected]  = useState(null);
-  const [rawData,   setRawData]   = useState(null);
-  const [loading,   setLoading]   = useState(true);
-  const [error,     setError]     = useState(null);
+  const [viewYear,      setViewYear]      = useState(today.getFullYear());
+  const [viewMonth,     setViewMonth]     = useState(today.getMonth());
+  const [selected,      setSelected]      = useState(null);
+  const [rawData,       setRawData]       = useState(null);
+  const [loading,       setLoading]       = useState(true);
+  const [error,         setError]         = useState(null);
+  const [customEntries, setCustomEntries] = useState([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -203,14 +341,19 @@ export default function Calendar() {
     options: { includeStatHolidays:true, rangeStart, rangeEnd },
   }), [shifts, debts, expenses, subscriptions, rangeStart, rangeEnd]);
 
+  // Merge financial events + custom entries into one date map
   const eventsByDate = useMemo(() => {
     const map = {};
     for (const ev of allEvents) {
       if (!map[ev.date]) map[ev.date] = [];
       map[ev.date].push(ev);
     }
+    for (const ev of customEntries) {
+      if (!map[ev.date]) map[ev.date] = [];
+      map[ev.date].push(ev);
+    }
     return map;
-  }, [allEvents]);
+  }, [allEvents, customEntries]);
 
   const gridDays = useMemo(() => {
     const first = new Date(viewYear, viewMonth, 1);
@@ -224,15 +367,24 @@ export default function Calendar() {
   const selectedEvents = selected ? (eventsByDate[selected]||[]) : [];
   const selectedMood   = selected ? moods[selected] : null;
 
-  const upcoming = useMemo(() => allEvents
-    .filter(e => e.date >= todayStr && e.type !== "holiday")
-    .slice(0, 10),
-  [allEvents, todayStr]);
+  const upcoming = useMemo(() => {
+    const customUpcoming = customEntries.filter(e => e.date >= todayStr);
+    return [...allEvents.filter(e => e.date >= todayStr && e.type !== "holiday"), ...customUpcoming]
+      .sort((a,b) => a.date.localeCompare(b.date))
+      .slice(0, 10);
+  }, [allEvents, customEntries, todayStr]);
 
   function prevMonth() { if(viewMonth===0){setViewYear(y=>y-1);setViewMonth(11);}else setViewMonth(m=>m-1); }
   function nextMonth() { if(viewMonth===11){setViewYear(y=>y+1);setViewMonth(0);}else setViewMonth(m=>m+1); }
 
-  // Count moods logged this month for the summary pill
+  function handleAddEntry(entry) {
+    setCustomEntries(prev => [...prev, entry]);
+  }
+
+  function handleDeleteEntry(id) {
+    setCustomEntries(prev => prev.filter(e => e.id !== id));
+  }
+
   const moodCountThisMonth = useMemo(() => {
     const prefix = `${viewYear}-${String(viewMonth+1).padStart(2,"0")}`;
     return Object.keys(moods).filter(k => k.startsWith(prefix)).length;
@@ -337,7 +489,6 @@ export default function Calendar() {
                       cursor:"pointer", fontSize:"18px", lineHeight:1, padding:"0 4px" }}>×</button>
                 </div>
 
-                {/* Mood row if logged */}
                 {selectedMood && (
                   <div style={{ display:"flex", alignItems:"center", gap:"12px",
                     padding:"10px 14px", borderRadius:radii.lg, marginBottom: selectedEvents.length > 0 ? "8px" : 0,
@@ -356,6 +507,7 @@ export default function Calendar() {
                 <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
                   {selectedEvents.map(ev=>{
                     const meta = TYPE_META[ev.type]||TYPE_META.bill;
+                    const isCustom = ev.type === "event" || ev.type === "reminder";
                     return (
                       <div key={ev.id} style={{ display:"flex", alignItems:"center", gap:"12px",
                         padding:"10px 14px", borderRadius:radii.lg,
@@ -364,11 +516,18 @@ export default function Calendar() {
                         <div style={{ flex:1, minWidth:0 }}>
                           <div style={{ fontSize:"13px", fontWeight:600, color:colors.text }}>{ev.title}</div>
                           <div style={{ fontSize:"10px", color:meta.color, fontWeight:600,
-                            textTransform:"uppercase", letterSpacing:"0.06em" }}>{meta.label}</div>
+                            textTransform:"uppercase", letterSpacing:"0.06em" }}>
+                            {meta.label}{ev.time ? ` · ${ev.time}` : ""}
+                          </div>
                         </div>
                         {ev.amount>0 && (
                           <span style={{ fontFamily:typography.fontDisplay, fontSize:"15px",
                             fontWeight:700, color:meta.color }}>{fmt(ev.amount)}</span>
+                        )}
+                        {isCustom && (
+                          <button onClick={() => handleDeleteEntry(ev.id)}
+                            style={{ background:"none", border:"none", color:colors.textMuted,
+                              cursor:"pointer", fontSize:"16px", lineHeight:1, padding:"0 2px" }}>×</button>
                         )}
                       </div>
                     );
@@ -376,6 +535,14 @@ export default function Calendar() {
                 </div>
               </SoftCard>
             )}
+
+            {/* Add event / reminder */}
+            <AddEntrySection
+              entries={customEntries}
+              onAdd={handleAddEntry}
+              onDelete={handleDeleteEntry}
+              today={today}
+            />
 
             {/* Upcoming Deadlines */}
             <div className="fade-up" style={{ animationDelay:"0.15s" }}>
