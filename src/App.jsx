@@ -10,7 +10,6 @@ import Dashboard  from "./pages/Dashboard";
 import Expenses   from "./pages/Expenses";
 import Income     from "./pages/Income";
 import Cards      from "./pages/Cards";
-import Debts      from "./pages/Debts";
 import Savings    from "./pages/Savings";
 import Calendar   from "./pages/Calendar";
 import Settings   from "./pages/Settings";
@@ -20,7 +19,6 @@ const PAGES = {
   expenses:  Expenses,
   income:    Income,
   cards:     Cards,
-  debts:     Debts,
   savings:   Savings,
   calendar:  Calendar,
   settings:  Settings,
