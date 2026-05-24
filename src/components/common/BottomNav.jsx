@@ -2,14 +2,14 @@
  * BottomNav.jsx
  * Mobile-first bottom navigation bar.
  *
- * Change from previous version:
- *   - background, borderTop, active/inactive colors now read from CSS vars
- *     (--nav-bg, --nav-border, --nav-shadow, --nav-active, --nav-inactive)
- *     so the nav automatically reflects whichever theme is active.
- *   - Income tab added (carried from previous update).
- *   - No layout or spacing changes.
+ * Fixes:
+ *  - Fixed height (64px) so it's always anchored to the bottom
+ *  - env(safe-area-inset-bottom) padding for iPhone home bar
+ *  - Tighter button sizing so 7 items fit comfortably on narrow screens
+ *  - minWidth reduced so nothing wraps or overflows
+ *  - All theme CSS vars retained from previous version
  */
-import { typography, radii, transitions } from "../../ui/designTokens";
+import { typography, transitions } from "../../ui/designTokens";
 
 const NAV_ITEMS = [
   { id: "dashboard", label: "Home",     emoji: "🏠" },
@@ -18,24 +18,28 @@ const NAV_ITEMS = [
   { id: "cards",     label: "Cards",    emoji: "💳" },
   { id: "debts",     label: "Debts",    emoji: "📊" },
   { id: "calendar",  label: "Calendar", emoji: "📅" },
-  { id: "settings",  label: "Settings", emoji: "⚙️"  },
+  { id: "settings",  label: "Settings", emoji: "⚙️" },
 ];
 
 export default function BottomNav({ activePage, onNavigate }) {
   return (
     <nav style={{
-      position:        "fixed",
-      bottom:          0,
-      left:            0,
-      right:           0,
-      backgroundColor: "var(--nav-bg)",
-      borderTop:       "1.5px solid var(--nav-border)",
-      display:         "flex",
-      justifyContent:  "space-around",
-      alignItems:      "center",
-      padding:         "6px 0 10px",
-      zIndex:          400,
-      boxShadow:       "var(--nav-shadow)",
+      position:         "fixed",
+      bottom:           0,
+      left:             0,
+      right:            0,
+      height:           "64px",
+      backgroundColor:  "var(--nav-bg)",
+      borderTop:        "1.5px solid var(--nav-border)",
+      boxShadow:        "var(--nav-shadow)",
+      display:          "flex",
+      justifyContent:   "space-around",
+      alignItems:       "center",
+      // Safe area inset for iPhone home bar — no content hidden behind it
+      paddingBottom:    "env(safe-area-inset-bottom)",
+      paddingLeft:      "env(safe-area-inset-left)",
+      paddingRight:     "env(safe-area-inset-right)",
+      zIndex:           400,
     }}>
       {NAV_ITEMS.map((item) => {
         const isActive = activePage === item.id;
@@ -47,25 +51,31 @@ export default function BottomNav({ activePage, onNavigate }) {
               display:        "flex",
               flexDirection:  "column",
               alignItems:     "center",
-              gap:            "3px",
-              padding:        "4px 8px",
-              borderRadius:   radii.lg,
-              cursor:         "pointer",
-              transition:     `all ${transitions.base}`,
-              fontSize:       "9px",
-              fontWeight:     isActive ? typography.bold : typography.medium,
-              color:          isActive ? "var(--nav-active)" : "var(--nav-inactive)",
+              justifyContent: "center",
+              gap:            "2px",
+              // flex:1 so all items share width equally regardless of label length
+              flex:           "1 1 0",
+              height:         "100%",
+              padding:        "6px 2px 4px",
               border:         "none",
+              borderRadius:   "10px",
+              cursor:         "pointer",
               background:     isActive ? "var(--primary-bg)" : "transparent",
-              minWidth:       "44px",
+              color:          isActive ? "var(--nav-active)" : "var(--nav-inactive)",
+              fontSize:       "8.5px",
+              fontWeight:     isActive ? typography.bold : typography.medium,
               letterSpacing:  "0.04em",
               textTransform:  "uppercase",
+              transition:     `all ${transitions.base}`,
+              // Prevent text overflow on very narrow screens
+              overflow:       "hidden",
+              whiteSpace:     "nowrap",
             }}
           >
             <span style={{
-              fontSize:   "20px",
+              fontSize:   "18px",
               lineHeight: 1,
-              filter:     isActive ? "none" : "grayscale(0.3) opacity(0.7)",
+              filter:     isActive ? "none" : "grayscale(0.3) opacity(0.65)",
               transform:  isActive ? "scale(1.1)" : "scale(1)",
               transition: `transform ${transitions.base}`,
             }}>
