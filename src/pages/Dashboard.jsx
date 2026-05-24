@@ -1,6 +1,9 @@
 /**
  * Dashboard.jsx
- * Financial summary — fixed income calc, savings buckets, AI Coach.
+ * Financial summary — manual-only income, savings buckets, AI Coach.
+ *
+ * FIX: Income is now read ONLY from rawData.sent (confirmed Budget Pool entries).
+ * No projected/estimated/assumed salary. If nothing is sent, income = $0.
  */
 
 import { useState, useEffect, useMemo } from "react";
@@ -12,13 +15,40 @@ import { colors, typography, radii, transitions } from "../ui/designTokens";
 
 const fmt = n => new Intl.NumberFormat("en-CA",{style:"currency",currency:"CAD",maximumFractionDigits:0}).format(n);
 
+// ── Period helpers (same logic as Expenses/Income pages) ──────────────────────
+const MO = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+function buildPeriods() {
+  const out = [];
+  const year = 2026;
+  for (let m = 0; m < 12; m++) {
+    const lastDay = new Date(year, m + 1, 0).getDate();
+    out.push({ k:`26${m}a`, lbl:`${MO[m]} 1–15`,          s:new Date(year,m,1),  e:new Date(year,m,15,23,59,59),      pd:new Date(year,m,7)  });
+    out.push({ k:`26${m}b`, lbl:`${MO[m]} 16–${lastDay}`, s:new Date(year,m,16), e:new Date(year,m,lastDay,23,59,59), pd:new Date(year,m,22) });
+  }
+  return out;
+}
+const PERIODS = buildPeriods();
+
+function currentPeriodKey() {
+  const now = new Date();
+  const p = PERIODS.find(p => now >= p.s && now <= p.e);
+  return p?.k ?? PERIODS[PERIODS.findIndex(p => p.s > now) - 1]?.k ?? PERIODS[0].k;
+}
+
+function currentPeriodLabel() {
+  const now = new Date();
+  const p = PERIODS.find(p => now >= p.s && now <= p.e);
+  return p?.lbl ?? "";
+}
+
 // ── AI Coach ──────────────────────────────────────────────────────────────────
-function AICoach({ rawData }) {
+function AICoach({ rawData, manualIncome, monthlyExpenses }) {
   const [messages, setMessages] = useState([
     { role:"assistant", content:"Hi! 👋 I'm your Budget Bloom AI Coach. Ask me anything about your finances — spending habits, saving tips, or how to hit your goals!" }
   ]);
-  const [input,    setInput]    = useState("");
-  const [loading,  setLoading]  = useState(false);
+  const [input,   setInput]   = useState("");
+  const [loading, setLoading] = useState(false);
 
   const apiKey = rawData?.openAIKey ?? "";
 
@@ -34,34 +64,21 @@ function AICoach({ rawData }) {
       return;
     }
 
-    // Build financial context
-    const incomes  = rawData?.incomes  ?? [];
-    const expenses = rawData?.expenses ?? [];
-    const savings  = rawData?.savings  ?? [];
-    const cards    = rawData?.cards    ?? [];
-    const goals    = rawData?.goals    ?? [];
-
-    const monthlyIncome = incomes.reduce((s, i) => {
-      if (i.type === "manual") return s + (Number(i.amount) || 0);
-      const weekly = (Number(i.hoursPerWeek) || 0) * (Number(i.hourlyRate) || 0);
-      return s + (i.frequency === "biweekly" ? weekly * 26 / 12 :
-                  i.frequency === "weekly"   ? weekly * 52 / 12 : weekly * 4.33);
-    }, 0);
-
-    const monthlyExpenses = expenses.filter(e => e.recurring || e.recur === "monthly")
-      .reduce((s, e) => s + (Number(e.amount || e.amt) || 0), 0);
+    const savings = rawData?.savings ?? [];
+    const cards   = rawData?.cards   ?? [];
+    const goals   = rawData?.goals   ?? [];
 
     const context = `
 You are a friendly, encouraging personal finance coach for Budget Bloom app.
-User's financial snapshot:
-- Monthly income: $${monthlyIncome.toFixed(2)} CAD
+User's financial snapshot (current pay period — manual entries only, no estimates):
+- Confirmed income this period: $${manualIncome.toFixed(2)} CAD
 - Monthly recurring expenses: $${monthlyExpenses.toFixed(2)} CAD
-- Monthly leftover: $${(monthlyIncome - monthlyExpenses).toFixed(2)} CAD
+- Monthly leftover: $${(manualIncome - monthlyExpenses).toFixed(2)} CAD
 - Savings buckets: ${savings.map(s=>`${s.name} ($${s.saved} saved of $${s.target} goal, $${s.monthly}/mo)`).join(", ") || "none"}
 - Credit cards: ${cards.map(c=>`${c.label} balance $${c.balance} limit $${c.limit}`).join(", ") || "none"}
 - Goals: ${goals.map(g=>`${g.label} ($${g.saved}/$${g.target})`).join(", ") || "none"}
-- Income sources: ${incomes.filter(i=>i.label&&i.id!==1779237062979).map(i=>i.label).join(", ")}
 
+IMPORTANT: Income shown is ONLY what was manually confirmed. Do not assume or estimate any additional income.
 Be warm, concise, and practical. Use CAD dollars. Give actionable advice.
     `.trim();
 
@@ -95,7 +112,6 @@ Be warm, concise, and practical. Use CAD dollars. Give actionable advice.
 
   return (
     <SoftCard variant="base" noAnimate style={{ marginTop:"24px" }}>
-      {/* Header */}
       <div style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"14px" }}>
         <div style={{ width:"36px", height:"36px", borderRadius:"50%",
           background:`linear-gradient(135deg, ${colors.pinkDeep}, ${colors.mauve})`,
@@ -108,7 +124,6 @@ Be warm, concise, and practical. Use CAD dollars. Give actionable advice.
         </div>
       </div>
 
-      {/* Messages */}
       <div style={{ display:"flex", flexDirection:"column", gap:"10px", marginBottom:"12px",
         maxHeight:"280px", overflowY:"auto", paddingRight:"4px" }}>
         {messages.map((m, i) => (
@@ -134,7 +149,6 @@ Be warm, concise, and practical. Use CAD dollars. Give actionable advice.
         )}
       </div>
 
-      {/* Input */}
       <div style={{ display:"flex", gap:"8px" }}>
         <input
           value={input}
@@ -159,7 +173,7 @@ Be warm, concise, and practical. Use CAD dollars. Give actionable advice.
   );
 }
 
-// ── Main Dashboard ─────────────────────────────────────────────────────────────
+// ── Main Dashboard ────────────────────────────────────────────────────────────
 export default function Dashboard() {
   const [rawData, setRawData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -183,33 +197,28 @@ export default function Dashboard() {
 
   const stats = useMemo(() => {
     if (!rawData) return null;
-    const incomes  = rawData.incomes  ?? [];
+
     const expenses = rawData.expenses ?? [];
     const savings  = rawData.savings  ?? [];
     const goals    = rawData.goals    ?? [];
+    const sent     = rawData.sent     ?? {};
 
-    // ── Fixed income calculation ─────────────────────────────────────────────
-    const monthlyIncome = incomes
-      .filter(i => i.label && i.id !== 1779237062979) // exclude test entry
-      .reduce((s, i) => {
-        if (i.type === "manual") return s + (Number(i.amount) || 0);
-        const weekly = (Number(i.hoursPerWeek) || 0) * (Number(i.hourlyRate) || 0);
-        const monthly =
-          i.frequency === "biweekly" ? weekly * 26 / 12 :
-          i.frequency === "weekly"   ? weekly * 52 / 12 :
-          weekly * 4.33;
-        return s + monthly;
-      }, 0);
+    // ── INCOME: ONLY from manually confirmed Budget Pool entries ─────────────
+    // Read from rawData.sent[currentPeriodKey] — same source as Income/Expenses pages.
+    // If nothing was manually sent, income = $0. No projections, no estimates.
+    const periodKey      = currentPeriodKey();
+    const periodLabel    = currentPeriodLabel();
+    const periodSent     = sent[periodKey] ?? [];
+    const confirmedIncome = periodSent.reduce((s, x) => s + (Number(x.amt) || 0), 0);
 
-    // ── Recurring expenses (new format: amt, old format: amount) ─────────────
+    // ── EXPENSES: recurring bills only (what's budgeted this month) ──────────
     const monthlyExpenses = expenses
       .filter(e => e.recurring || e.recur === "monthly")
       .reduce((s, e) => s + (Number(e.amount || e.amt) || 0), 0);
 
-    const leftover   = monthlyIncome - monthlyExpenses;
+    const leftover   = confirmedIncome - monthlyExpenses;
     const totalSaved = savings.reduce((s, b) => s + (Number(b.saved) || 0), 0);
 
-    // Savings bucket progress
     const savingsBuckets = savings.map(b => ({
       id:      b.id,
       label:   b.name,
@@ -220,7 +229,6 @@ export default function Dashboard() {
       pct:     b.target > 0 ? Math.min(100, Math.round((Number(b.saved)||0) / Number(b.target) * 100)) : null,
     }));
 
-    // Goals (legacy)
     const goalProgress = goals.map(g => ({
       label:  g.label,
       pct:    Math.min(100, Math.round((Number(g.saved)||0)/(Number(g.target)||1)*100)),
@@ -229,7 +237,16 @@ export default function Dashboard() {
       color:  g.color || colors.pink,
     }));
 
-    return { monthlyIncome, monthlyExpenses, leftover, totalSaved, savingsBuckets, goalProgress };
+    return {
+      confirmedIncome,
+      monthlyExpenses,
+      leftover,
+      totalSaved,
+      savingsBuckets,
+      goalProgress,
+      periodLabel,
+      periodSentCount: periodSent.length,
+    };
   }, [rawData]);
 
   const name = rawData?.profile?.name;
@@ -246,7 +263,7 @@ export default function Dashboard() {
           </p>
           <h1 style={{ fontFamily:typography.fontDisplay, fontSize:"28px", fontWeight:700,
             color:colors.text, letterSpacing:"-0.03em", lineHeight:1.1 }}>
-            {name ? `Hi, ${name} 👋` : "Dashboard"}
+            {name ? `Hey ${name}! 🌸` : "Dashboard"}
           </h1>
         </div>
 
@@ -259,11 +276,25 @@ export default function Dashboard() {
 
         {!loading && stats && (
           <>
+            {/* Period income label */}
+            <div style={{ fontSize:"11px", fontWeight:700, color:colors.textMuted, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:"8px" }}>
+              {stats.periodLabel} — manually confirmed income
+            </div>
+
+            {/* No income yet notice */}
+            {stats.periodSentCount === 0 && (
+              <SoftCard variant="soft" padding="12px 16px" noAnimate style={{ marginBottom:"16px" }}>
+                <p style={{ fontSize:"12px", color:colors.textMuted, margin:0 }}>
+                  💡 No income sent to the Budget Pool yet for this period. Go to the <strong>Salary</strong> tab to log shifts and send income.
+                </p>
+              </SoftCard>
+            )}
+
             {/* Leftover hero */}
             <SoftCard variant="highlight" style={{ marginBottom:"16px", textAlign:"center" }} noAnimate>
               <p style={{ fontSize:"11px", fontWeight:700, color:colors.pinkDeep,
                 letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:"4px" }}>
-                Monthly Leftover
+                Period Leftover
               </p>
               <p style={{ fontFamily:typography.fontDisplay, fontSize:"40px", fontWeight:700,
                 color: stats.leftover >= 0 ? colors.pinkDeep : colors.critical,
@@ -271,21 +302,24 @@ export default function Dashboard() {
                 {fmt(stats.leftover)}
               </p>
               <p style={{ fontSize:"12px", color:colors.textMuted, marginTop:"6px" }}>
-                after all bills & expenses
+                confirmed income minus recurring bills
               </p>
             </SoftCard>
 
             {/* Income / Bills */}
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px", marginBottom:"16px" }}>
               {[
-                { label:"Income", value:fmt(stats.monthlyIncome),   color:colors.gold, emoji:"💛" },
-                { label:"Bills",  value:fmt(stats.monthlyExpenses),  color:colors.pink, emoji:"📄" },
-              ].map(({label,value,color,emoji}) => (
+                { label:"Income",      value:fmt(stats.confirmedIncome), color:colors.gold, emoji:"💛",
+                  sub: stats.periodSentCount > 0 ? `${stats.periodSentCount} entry sent` : "nothing sent yet" },
+                { label:"Recurring Bills", value:fmt(stats.monthlyExpenses), color:colors.pink, emoji:"📄",
+                  sub:"budgeted this month" },
+              ].map(({label,value,color,emoji,sub}) => (
                 <SoftCard key={label} variant="base" padding="14px 12px" noAnimate style={{ textAlign:"center" }}>
                   <div style={{ fontSize:"18px", marginBottom:"4px" }}>{emoji}</div>
                   <div style={{ fontSize:"10px", fontWeight:700, color:colors.textMuted,
                     letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:"2px" }}>{label}</div>
                   <div style={{ fontFamily:typography.fontDisplay, fontSize:"16px", fontWeight:700, color }}>{value}</div>
+                  <div style={{ fontSize:"10px", color:colors.textMuted, marginTop:"3px" }}>{sub}</div>
                 </SoftCard>
               ))}
             </div>
@@ -373,7 +407,11 @@ export default function Dashboard() {
             )}
 
             {/* AI Coach */}
-            <AICoach rawData={rawData} />
+            <AICoach
+              rawData={rawData}
+              manualIncome={stats.confirmedIncome}
+              monthlyExpenses={stats.monthlyExpenses}
+            />
           </>
         )}
       </div>
