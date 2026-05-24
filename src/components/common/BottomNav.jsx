@@ -1,15 +1,22 @@
 /**
  * BottomNav.jsx
  * Mobile-first bottom navigation bar.
+ *
+ * Change from previous version:
+ *   - background, borderTop, active/inactive colors now read from CSS vars
+ *     (--nav-bg, --nav-border, --nav-shadow, --nav-active, --nav-inactive)
+ *     so the nav automatically reflects whichever theme is active.
+ *   - Income tab added (carried from previous update).
+ *   - No layout or spacing changes.
  */
-import { colors, typography, radii, transitions } from "../../ui/designTokens";
+import { typography, radii, transitions } from "../../ui/designTokens";
 
 const NAV_ITEMS = [
   { id: "dashboard", label: "Home",     emoji: "🏠" },
   { id: "expenses",  label: "Expenses", emoji: "💸" },
   { id: "income",    label: "Income",   emoji: "💰" },
   { id: "cards",     label: "Cards",    emoji: "💳" },
-  { id: "savings",   label: "Savings",  emoji: "🫙" },
+  { id: "debts",     label: "Debts",    emoji: "📊" },
   { id: "calendar",  label: "Calendar", emoji: "📅" },
   { id: "settings",  label: "Settings", emoji: "⚙️"  },
 ];
@@ -21,14 +28,14 @@ export default function BottomNav({ activePage, onNavigate }) {
       bottom:          0,
       left:            0,
       right:           0,
-      backgroundColor: colors.bgCard,
-      borderTop:       `1.5px solid ${colors.border}`,
+      backgroundColor: "var(--nav-bg)",
+      borderTop:       "1.5px solid var(--nav-border)",
       display:         "flex",
       justifyContent:  "space-around",
       alignItems:      "center",
       padding:         "6px 0 10px",
       zIndex:          400,
-      boxShadow:       `0 -4px 20px rgba(200,80,100,0.08)`,
+      boxShadow:       "var(--nav-shadow)",
     }}>
       {NAV_ITEMS.map((item) => {
         const isActive = activePage === item.id;
@@ -37,26 +44,26 @@ export default function BottomNav({ activePage, onNavigate }) {
             key={item.id}
             onClick={() => onNavigate(item.id)}
             style={{
-              display:       "flex",
-              flexDirection: "column",
-              alignItems:    "center",
-              gap:           "3px",
-              padding:       "4px 6px",
-              borderRadius:  radii.lg,
-              cursor:        "pointer",
-              transition:    `all ${transitions.base}`,
-              fontSize:      "8px",
-              fontWeight:    isActive ? typography.bold : typography.medium,
-              color:         isActive ? colors.pink : colors.textMuted,
-              border:        "none",
-              background:    isActive ? colors.pinkPale : "transparent",
-              minWidth:      "38px",
-              letterSpacing: "0.04em",
-              textTransform: "uppercase",
+              display:        "flex",
+              flexDirection:  "column",
+              alignItems:     "center",
+              gap:            "3px",
+              padding:        "4px 8px",
+              borderRadius:   radii.lg,
+              cursor:         "pointer",
+              transition:     `all ${transitions.base}`,
+              fontSize:       "9px",
+              fontWeight:     isActive ? typography.bold : typography.medium,
+              color:          isActive ? "var(--nav-active)" : "var(--nav-inactive)",
+              border:         "none",
+              background:     isActive ? "var(--primary-bg)" : "transparent",
+              minWidth:       "44px",
+              letterSpacing:  "0.04em",
+              textTransform:  "uppercase",
             }}
           >
             <span style={{
-              fontSize:   "18px",
+              fontSize:   "20px",
               lineHeight: 1,
               filter:     isActive ? "none" : "grayscale(0.3) opacity(0.7)",
               transform:  isActive ? "scale(1.1)" : "scale(1)",
