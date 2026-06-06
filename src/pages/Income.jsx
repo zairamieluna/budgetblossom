@@ -1,14 +1,6 @@
 /**
  * Income.jsx  (Salary / Shifts page)
- * Rebuilt from V2 HTML source + existing Income.jsx.
- *
- * Changes from the previous Income.jsx:
- *  - Period navigator extracted to its own <PeriodNav> component
- *  - Pooled income card extracted to <PooledIncomeCard>
- *  - JobCard: after addShift, only time/type reset (date kept for fast multi-entry)
- *  - "No shifts logged yet" empty state added per job card
- *  - DividerLabel replaces the raw inline "— Or Enter Actual —" string
- *  - All Supabase load/save logic, bottom-sheet AddJobModal, Toast unchanged
+ * FIXED: All jobs can now be deleted (CORE_IDS = [])
  */
 
 import { useState, useMemo, useEffect, useCallback } from "react";
@@ -16,9 +8,6 @@ import { supabase } from "../lib/supabaseClient";
 import LoadingSpinner from "../components/common/LoadingSpinner";
 import { typography } from "../ui/designTokens";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PERIOD ENGINE
-// ─────────────────────────────────────────────────────────────────────────────
 const MO = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
 function buildPeriods() {
@@ -51,9 +40,6 @@ function currentPeriodIdx() {
   return idx >= 0 ? idx : Math.max(0, PERIODS.findIndex(p => p.s > now) - 1);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CANADIAN HOLIDAYS 2026
-// ─────────────────────────────────────────────────────────────────────────────
 const HOLS = [
   { d:"2026-01-01", n:"New Year's Day" },
   { d:"2026-02-16", n:"Family Day (ON)" },
@@ -70,9 +56,6 @@ const HOLS = [
 ];
 const getHol = d => HOLS.find(h => h.d === d) ?? null;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// HELPERS
-// ─────────────────────────────────────────────────────────────────────────────
 const fmt = n =>
   new Intl.NumberFormat("en-CA", { style:"currency", currency:"CAD", minimumFractionDigits:2 })
     .format(n ?? 0).replace("CA$","$");
@@ -88,9 +71,6 @@ function calcHrs(inT, outT, brk) {
   return Math.max(0, (m - brk) / 60);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CONSTANTS
-// ─────────────────────────────────────────────────────────────────────────────
 const DEFAULT_JOBS = [
   { id:"j1", person:"Zai",   title:"A&W",     employer:"A&W Canada",       rate:17.75, otRate:26.63, ded:5.29,  color:0 },
   { id:"j2", person:"Zai",   title:"Loblaws", employer:"Loblaw Companies", rate:17.70, otRate:26.55, ded:14.7,  color:1 },
@@ -98,11 +78,10 @@ const DEFAULT_JOBS = [
 ];
 
 const JOB_COLORS = ["#db2777","#3a6b4e","#2860a0","#a67c20","#7c3aed"];
-const CORE_IDS   = ["j1","j2","j3"];
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SHARED STYLE ATOMS
-// ─────────────────────────────────────────────────────────────────────────────
+// ✅ FIXED: Empty array = ALL jobs can be deleted
+const CORE_IDS = [];
+
 const cardStyle = {
   background: "#ffffff",
   border: "1px solid #fce7f3",
@@ -151,9 +130,6 @@ function DividerLabel({ children }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TOAST
-// ─────────────────────────────────────────────────────────────────────────────
 function Toast({ msg, onDone }) {
   useEffect(() => {
     if (!msg) return;
@@ -171,16 +147,12 @@ function Toast({ msg, onDone }) {
       fontSize: "13px", fontWeight: 600, zIndex: 700,
       whiteSpace: "nowrap",
       boxShadow: "0 4px 20px rgba(0,0,0,0.25)",
-      animation: "fadeUp .2s ease both",
     }}>
       {msg}
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PERIOD NAVIGATOR
-// ─────────────────────────────────────────────────────────────────────────────
 function PeriodNav({ pidx, period, onChange }) {
   const navBtn = (disabled) => ({
     background: "#fff", border: "1.5px solid #f0dce4", borderRadius: "9px",
@@ -213,9 +185,6 @@ function PeriodNav({ pidx, period, onChange }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ADD JOB MODAL  (bottom-sheet)
-// ─────────────────────────────────────────────────────────────────────────────
 function AddJobModal({ open, onClose, onAdd }) {
   const [form, setForm] = useState({
     person: "Zai", title: "", employer: "", rate: "", ded: "5.29",
@@ -305,9 +274,6 @@ function AddJobModal({ open, onClose, onAdd }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// JOB CARD
-// ─────────────────────────────────────────────────────────────────────────────
 function JobCard({ job, periodKey, shifts, onAddShift, onRmShift, onSendShifts, onSendActual, onRemoveJob }) {
   const [date,    setDate]    = useState(todayStr());
   const [inT,     setInT]     = useState("09:00");
@@ -319,7 +285,6 @@ function JobCard({ job, periodKey, shifts, onAddShift, onRmShift, onSendShifts, 
   const [actualG, setActualG] = useState("");
 
   const accentColor = JOB_COLORS[job.color ?? 0];
-
   const totH  = shifts.reduce((s, x) => s + (x.hrs   ?? 0), 0);
   const gross = shifts.reduce((s, x) => s + (x.gross ?? 0), 0);
   const ded   = gross * (job.ded / 100);
@@ -354,7 +319,6 @@ function JobCard({ job, periodKey, shifts, onAddShift, onRmShift, onSendShifts, 
       rate, gross: grss,
       hol:  hol?.n ?? null,
     });
-    // Keep date (useful for multi-shift days), reset everything else
     setInT("09:00"); setOutT("17:00"); setBrk("30"); setType("reg"); setHolNote("");
   }
 
@@ -375,7 +339,6 @@ function JobCard({ job, periodKey, shifts, onAddShift, onRmShift, onSendShifts, 
 
   return (
     <div style={cardStyle}>
-
       {/* Header */}
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"12px" }}>
         <div>
@@ -389,30 +352,24 @@ function JobCard({ job, periodKey, shifts, onAddShift, onRmShift, onSendShifts, 
             {fmt(job.rate)}/hr · OT {fmt(job.otRate)}/hr · ~{job.ded}% deduction
           </div>
         </div>
-        {!CORE_IDS.includes(job.id) && (
-          <button
-            onClick={() => onRemoveJob(job.id)}
-            style={{ background:"none", border:"none", cursor:"pointer", color:"#d4b8c4", fontSize:"0.85rem", padding:"0 2px", lineHeight:1 }}
-            onMouseEnter={e => e.target.style.color = "#c24b1a"}
-            onMouseLeave={e => e.target.style.color = "#d4b8c4"}
-          >✕</button>
-        )}
+        {/* ✅ FIXED: Shows for ALL jobs */}
+        <button
+          onClick={() => onRemoveJob(job.id)}
+          style={{ background:"none", border:"none", cursor:"pointer", color:"#d4b8c4", fontSize:"0.85rem", padding:"0 2px", lineHeight:1 }}
+          onMouseEnter={e => e.target.style.color = "#c24b1a"}
+          onMouseLeave={e => e.target.style.color = "#d4b8c4"}
+        >✕</button>
       </div>
 
-      {/* Holiday note */}
       {holNote && (
         <div style={{ background:"#faf5e6", border:"1px solid #dcca84", borderRadius:"9px", padding:"8px 12px", marginBottom:"10px", fontSize:"0.75rem", color:"#7a5010", fontWeight:600 }}>
           {holNote}
         </div>
       )}
 
-      {/* Stat / holiday OT note */}
       {(type === "stat" || type === "holiday_ot") && (
         <div style={{ background:"#faf5e6", border:"1px solid #dcca84", borderRadius:"9px", padding:"8px 12px", marginBottom:"10px", fontSize:"0.72rem", color:"#7a5010" }}>
-          ⭐ {type === "stat"
-            ? "Stat pay = hours × rate × 1.5."
-            : "Holiday OT = hours × rate × 2."
-          } Added on top of regular pay.
+          ⭐ {type === "stat" ? "Stat pay = hours × rate × 1.5." : "Holiday OT = hours × rate × 2."} Added on top of regular pay.
         </div>
       )}
 
@@ -421,7 +378,6 @@ function JobCard({ job, periodKey, shifts, onAddShift, onRmShift, onSendShifts, 
         <div style={{ fontSize:"0.72rem", fontWeight:700, color:"#9b6b8a", letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:"8px" }}>
           Log Shift
         </div>
-
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px" }}>
           <div>
             <Lbl>Date</Lbl>
@@ -440,14 +396,12 @@ function JobCard({ job, periodKey, shifts, onAddShift, onRmShift, onSendShifts, 
             <input style={inp} type="time" value={outT} onChange={e => setOutT(e.target.value)} />
           </div>
         </div>
-
         <Lbl>Pay Type</Lbl>
         <select style={inp} value={type} onChange={e => setType(e.target.value)}>
           {payTypeOptions.map(o => (
             <option key={o.v} value={o.v}>{o.l}</option>
           ))}
         </select>
-
         <button
           onClick={handleAddShift}
           style={{ width:"100%", marginTop:"10px", padding:"10px", borderRadius:"9px", background:"#db2777", border:"none", color:"#fff", fontFamily:"'DM Sans',sans-serif", fontWeight:700, fontSize:"13px", cursor:"pointer" }}
@@ -464,9 +418,7 @@ function JobCard({ job, periodKey, shifts, onAddShift, onRmShift, onSendShifts, 
               <div style={{ flex:1 }}>
                 <div style={{ fontSize:"0.83rem", fontWeight:600 }}>
                   {s.date}
-                  {s.hol && (
-                    <span style={{ color:"#a67c20", fontSize:"0.65rem", marginLeft:"5px" }}>🎉 {s.hol}</span>
-                  )}
+                  {s.hol && <span style={{ color:"#a67c20", fontSize:"0.65rem", marginLeft:"5px" }}>🎉 {s.hol}</span>}
                 </div>
                 <div style={{ fontSize:"0.67rem", color:"#9b6b8a", marginTop:"1px" }}>
                   {s.inT}–{s.outT} · {s.hrs.toFixed(2)} hrs · {s.type} @ {fmt(s.rate)}/hr
@@ -477,7 +429,7 @@ function JobCard({ job, periodKey, shifts, onAddShift, onRmShift, onSendShifts, 
               </div>
               <button
                 onClick={() => onRmShift(job.id, s.id)}
-                style={{ background:"none", border:"none", cursor:"pointer", color:"#d4b8c4", fontSize:"0.95rem", padding:"0 2px", transition:"color .15s", lineHeight:1, flexShrink:0 }}
+                style={{ background:"none", border:"none", cursor:"pointer", color:"#d4b8c4", fontSize:"0.95rem", padding:"0 2px", lineHeight:1, flexShrink:0 }}
                 onMouseEnter={e => e.target.style.color = "#c24b1a"}
                 onMouseLeave={e => e.target.style.color = "#d4b8c4"}
               >✕</button>
@@ -485,17 +437,15 @@ function JobCard({ job, periodKey, shifts, onAddShift, onRmShift, onSendShifts, 
           ))}
         </div>
       ) : (
-        <p style={{ fontSize:"0.77rem", color:"#9b6b8a", marginBottom:"12px" }}>
-          No shifts logged yet.
-        </p>
+        <p style={{ fontSize:"0.77rem", color:"#9b6b8a", marginBottom:"12px" }}>No shifts logged yet.</p>
       )}
 
-      {/* Pay summary box */}
+      {/* Pay summary */}
       <div style={{ background:"#fff5f9", border:"1px solid #fce7f3", borderRadius:"9px", padding:"13px", marginBottom:"12px" }}>
         {[
-          { l:"Total Hours",                   v:`${totH.toFixed(2)} hrs`, c:"#1a0f1e" },
-          { l:"Gross Pay",                      v: fmt(gross),              c:"#3a6b4e" },
-          { l:`Est. Deductions (${job.ded}%)`,  v:`−${fmt(ded)}`,           c:"#9b6b8a" },
+          { l:"Total Hours",                  v:`${totH.toFixed(2)} hrs`, c:"#1a0f1e" },
+          { l:"Gross Pay",                     v: fmt(gross),              c:"#3a6b4e" },
+          { l:`Est. Deductions (${job.ded}%)`, v:`−${fmt(ded)}`,           c:"#9b6b8a" },
         ].map(({ l, v, c }) => (
           <div key={l} style={{ display:"flex", justifyContent:"space-between", fontSize:"0.81rem", marginBottom:"6px" }}>
             <span style={{ color:"#9b6b8a" }}>{l}</span>
@@ -508,7 +458,6 @@ function JobCard({ job, periodKey, shifts, onAddShift, onRmShift, onSendShifts, 
         </div>
       </div>
 
-      {/* Send from shifts */}
       <button
         onClick={() => onSendShifts(job.id)}
         disabled={shifts.length === 0}
@@ -518,13 +467,12 @@ function JobCard({ job, periodKey, shifts, onAddShift, onRmShift, onSendShifts, 
           border:"none", color:"#fff",
           fontFamily:"'DM Sans',sans-serif", fontWeight:700, fontSize:"13px",
           cursor: shifts.length > 0 ? "pointer" : "not-allowed",
-          marginBottom:"12px", transition:"background .2s",
+          marginBottom:"12px",
         }}
       >
         ✓ Send to Budget Pool
       </button>
 
-      {/* Or enter actual */}
       <DividerLabel>Or Enter Actual</DividerLabel>
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px", marginBottom:"8px" }}>
         <div>
@@ -546,16 +494,12 @@ function JobCard({ job, periodKey, shifts, onAddShift, onRmShift, onSendShifts, 
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// POOLED INCOME CARD
-// ─────────────────────────────────────────────────────────────────────────────
 function PooledIncomeCard({ periodSent, periodLabel, totalPool }) {
   return (
     <div style={cardStyle}>
       <div style={{ fontFamily: typography.fontDisplay, fontSize:"0.97rem", fontWeight:700, marginBottom:"12px" }}>
         💰 Pooled Income — {periodLabel}
       </div>
-
       {periodSent.length === 0 ? (
         <p style={{ color:"#9b6b8a", fontSize:"0.75rem" }}>No salary sent yet this period.</p>
       ) : (
@@ -571,9 +515,7 @@ function PooledIncomeCard({ periodSent, periodLabel, totalPool }) {
               <span style={{ background:"#eaf3ee", color:"#3a6b4e", fontSize:"0.57rem", fontWeight:700, padding:"2px 6px", borderRadius:"5px", margin:"0 8px", letterSpacing:"0.04em", flexShrink:0 }}>
                 SENT
               </span>
-              <div style={{ fontWeight:700, color:"#3a6b4e", flexShrink:0 }}>
-                {fmt(s.amt)}
-              </div>
+              <div style={{ fontWeight:700, color:"#3a6b4e", flexShrink:0 }}>{fmt(s.amt)}</div>
             </div>
           ))}
           <div style={{ display:"flex", justifyContent:"space-between", paddingTop:"10px", fontWeight:700, fontSize:"0.9rem", borderTop:"1px solid #fce7f3", marginTop:"4px" }}>
@@ -586,9 +528,6 @@ function PooledIncomeCard({ periodSent, periodLabel, totalPool }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MAIN — Income
-// ─────────────────────────────────────────────────────────────────────────────
 export default function Income() {
   const [rawData,    setRawData]    = useState(null);
   const [loading,    setLoading]    = useState(true);
@@ -598,7 +537,6 @@ export default function Income() {
   const [addJobOpen, setAddJobOpen] = useState(false);
   const [pidx,       setPidx]       = useState(currentPeriodIdx);
 
-  // ── Load ────────────────────────────────────────────────────────────────
   useEffect(() => {
     let dead = false;
     (async () => {
@@ -619,7 +557,6 @@ export default function Income() {
     return () => { dead = true; };
   }, []);
 
-  // ── Save ────────────────────────────────────────────────────────────────
   const save = useCallback(async (updated) => {
     setSaving(true);
     try {
@@ -636,7 +573,6 @@ export default function Income() {
     }
   }, []);
 
-  // ── Derived ─────────────────────────────────────────────────────────────
   const jobs   = useMemo(() => rawData?.jobs   ?? DEFAULT_JOBS, [rawData]);
   const shifts = useMemo(() => rawData?.shifts ?? {}, [rawData]);
   const sent   = useMemo(() => rawData?.sent   ?? {}, [rawData]);
@@ -646,7 +582,6 @@ export default function Income() {
   const periodSent = useMemo(() => sent[periodKey] ?? [], [sent, periodKey]);
   const totalPool  = useMemo(() => periodSent.reduce((s, x) => s + (x.amt ?? 0), 0), [periodSent]);
 
-  // ── Actions ─────────────────────────────────────────────────────────────
   function handleAddShift(jid, shift) {
     const sk  = `${jid}|${periodKey}`;
     const cur = shifts[sk] ?? [];
@@ -670,10 +605,8 @@ export default function Income() {
     const gross = jshifts.reduce((s, x) => s + (x.gross ?? 0), 0);
     const net   = +(gross * (1 - job.ded / 100)).toFixed(2);
     const entry = {
-      src:    `${job.person} — ${job.title}`,
-      amt:    net, gross,
-      date:   todayStr(),
-      person: job.person,
+      src: `${job.person} — ${job.title}`, amt: net, gross,
+      date: todayStr(), person: job.person,
     };
     save({
       ...rawData,
@@ -687,10 +620,8 @@ export default function Income() {
     const job = jobs.find(j => j.id === jid);
     if (!job) return;
     const entry = {
-      src:    `${job.person} — ${job.title} (actual)`,
-      amt:    net, gross,
-      date:   todayStr(),
-      person: job.person,
+      src: `${job.person} — ${job.title} (actual)`, amt: net, gross,
+      date: todayStr(), person: job.person,
     };
     save({
       ...rawData,
@@ -707,14 +638,13 @@ export default function Income() {
   function handleRemoveJob(jid) {
     if (!window.confirm("Remove this job?")) return;
     save({ ...rawData, jobs: jobs.filter(j => j.id !== jid) });
+    setToast("🗑 Job removed");
   }
 
-  // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div style={{ minHeight:"100vh", background:"#fdf6f8", fontFamily:"'DM Sans',sans-serif", color:"#1a0f1e", paddingBottom:"80px" }}>
       <div style={{ maxWidth:"640px", margin:"0 auto", padding:"14px" }}>
 
-        {/* Page header */}
         <div className="fade-up" style={{ padding:"28px 0 14px", display:"flex", justifyContent:"space-between", alignItems:"baseline" }}>
           <div>
             <p style={{ fontSize:"11px", fontWeight:700, color:"#9b6b8a", letterSpacing:"0.12em", textTransform:"uppercase", marginBottom:"4px" }}>
