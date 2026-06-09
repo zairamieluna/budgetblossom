@@ -1,6 +1,7 @@
 /**
  * Income.jsx  (Salary / Shifts page)
  * FIXED: All jobs can now be deleted (CORE_IDS = [])
+ * NEW: Pooled income entries can now be individually removed
  */
 
 import { useState, useMemo, useEffect, useCallback } from "react";
@@ -494,7 +495,8 @@ function JobCard({ job, periodKey, shifts, onAddShift, onRmShift, onSendShifts, 
   );
 }
 
-function PooledIncomeCard({ periodSent, periodLabel, totalPool }) {
+// ✅ UPDATED: PooledIncomeCard now accepts onRemove and shows a ✕ per entry
+function PooledIncomeCard({ periodSent, periodLabel, totalPool, onRemove }) {
   return (
     <div style={cardStyle}>
       <div style={{ fontFamily: typography.fontDisplay, fontSize:"0.97rem", fontWeight:700, marginBottom:"12px" }}>
@@ -516,6 +518,14 @@ function PooledIncomeCard({ periodSent, periodLabel, totalPool }) {
                 SENT
               </span>
               <div style={{ fontWeight:700, color:"#3a6b4e", flexShrink:0 }}>{fmt(s.amt)}</div>
+              {/* ✅ NEW: Remove pooled entry button */}
+              <button
+                onClick={() => onRemove(i)}
+                style={{ background:"none", border:"none", cursor:"pointer", color:"#d4b8c4", fontSize:"0.95rem", padding:"0 2px", lineHeight:1, flexShrink:0, marginLeft:"4px" }}
+                onMouseEnter={e => e.target.style.color = "#c24b1a"}
+                onMouseLeave={e => e.target.style.color = "#d4b8c4"}
+                title="Remove this entry"
+              >✕</button>
             </div>
           ))}
           <div style={{ display:"flex", justifyContent:"space-between", paddingTop:"10px", fontWeight:700, fontSize:"0.9rem", borderTop:"1px solid #fce7f3", marginTop:"4px" }}>
@@ -641,6 +651,14 @@ export default function Income() {
     setToast("🗑 Job removed");
   }
 
+  // ✅ NEW: Remove a single entry from the pooled income list
+  function handleRemoveSent(index) {
+    if (!window.confirm("Remove this entry from the pool?")) return;
+    const updated = (sent[periodKey] ?? []).filter((_, i) => i !== index);
+    save({ ...rawData, sent: { ...sent, [periodKey]: updated } });
+    setToast("🗑 Entry removed from pool");
+  }
+
   return (
     <div style={{ minHeight:"100vh", background:"#fdf6f8", fontFamily:"'DM Sans',sans-serif", color:"#1a0f1e", paddingBottom:"80px" }}>
       <div style={{ maxWidth:"640px", margin:"0 auto", padding:"14px" }}>
@@ -691,6 +709,7 @@ export default function Income() {
               periodSent={periodSent}
               periodLabel={period?.lbl}
               totalPool={totalPool}
+              onRemove={handleRemoveSent}
             />
 
             <button
