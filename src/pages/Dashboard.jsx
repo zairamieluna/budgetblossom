@@ -9,7 +9,7 @@
  *  - Period selector lets user browse any period
  */
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "../lib/supabaseClient";
 import SoftCard from "../components/common/SoftCard";
 import ProgressBar from "../components/common/ProgressBar";
@@ -43,11 +43,11 @@ function currentPeriodIdx() {
 
 // ── Mood Tracker ─────────────────────────────────────────────────────────────
 const MOODS = [
-  { emoji: "😊", label: "Happy",   value: "happy"   },
-  { emoji: "😐", label: "Okay",    value: "okay"    },
-  { emoji: "😔", label: "Sad",     value: "sad"     },
-  { emoji: "😤", label: "Stressed",value: "stressed"},
-  { emoji: "🥲", label: "Meh",     value: "meh"     },
+  { emoji: "😊", label: "Happy",    value: "happy"    },
+  { emoji: "😐", label: "Okay",     value: "okay"     },
+  { emoji: "😔", label: "Sad",      value: "sad"      },
+  { emoji: "😤", label: "Stressed", value: "stressed" },
+  { emoji: "🥲", label: "Meh",      value: "meh"      },
 ];
 
 function MoodTracker({ rawData, onSave, saving }) {
@@ -118,33 +118,39 @@ function MoodTracker({ rawData, onSave, saving }) {
 }
 
 // ── AI Coach ──────────────────────────────────────────────────────────────────
+const QUICK_PROMPTS = [
+  "Why is my balance negative?",
+  "How do I hit my savings goal?",
+  "Tips to cut my expenses",
+  "Am I saving enough?",
+];
+
 function AICoach({ rawData, periodIncome, periodExpenses }) {
   const [messages, setMessages] = useState([
-    { role: "assistant", content: "Hi! 👋 I'm your Budget Bloom AI Coach. Ask me anything about your finances — spending habits, saving tips, or how to hit your goals!" }
+    {
+      role: "assistant",
+      content: "Hi! 👋 I'm your Budget Bloom AI Coach. Ask me anything about your finances — spending habits, saving tips, or how to hit your goals!",
+    },
   ]);
-  const [input,   setInput]   = useState("");
-  const [loading, setLoading] = useState(false);
+  const [input,     setInput]     = useState("");
+  const [loading,   setLoading]   = useState(false);
+  const [showChips, setShowChips] = useState(true);
+  const messagesEndRef            = useRef(null);
 
-  const apiKey = rawData?.openAIKey ?? "";
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
 
-  async function send() {
-    const q = input.trim();
+  async function send(overrideText) {
+    const q = (overrideText ?? input).trim();
     if (!q || loading) return;
-    if (!apiKey) {
-      setMessages(m => [...m,
-        { role: "user", content: q },
-        { role: "assistant", content: "⚠️ No OpenAI key found. Add your key in Settings to use the AI Coach." }
-      ]);
-      setInput("");
-      return;
-    }
 
-    const savings = rawData?.savings ?? [];
-    const cards   = rawData?.cards   ?? [];
+    const savings   = rawData?.savings ?? [];
+    const cards     = rawData?.cards   ?? [];
     const remaining = periodIncome - periodExpenses;
 
-    const context = `
-You are a friendly, encouraging personal finance coach for Budget Bloom app.
+    const systemPrompt = `You are a friendly, encouraging personal finance coach for the Budget Bloom app.
+
 User's financial snapshot (current pay period — no estimates, no cross-period data):
 - Confirmed income this period: $${periodIncome.toFixed(2)} CAD
 - Total expenses this period: $${periodExpenses.toFixed(2)} CAD
@@ -152,33 +158,48 @@ User's financial snapshot (current pay period — no estimates, no cross-period 
 - Savings buckets: ${savings.map(s => `${s.name} ($${s.saved} saved of $${s.target} goal, $${s.monthly}/mo)`).join(", ") || "none"}
 - Credit cards: ${cards.map(c => `${c.label} balance $${c.balance} limit $${c.limit}`).join(", ") || "none"}
 
-IMPORTANT: Only use data from the current period. Do not estimate or assume any additional income.
-Be warm, concise, and practical. Use CAD dollars. Give actionable advice.
-    `.trim();
+IMPORTANT: Only reference data from the current period. Do not estimate or assume additional income.
+Be warm, concise, and practical. Use CAD dollars. Give actionable advice. Keep replies under 80 words.`;
 
-    const newMessages = [...messages, { role: "user", content: q }];
-    setMessages(newMessages);
+    const updatedMessages = [...messages, { role: "user", content: q }];
+    setMessages(updatedMessages);
     setInput("");
+    setShowChips(false);
     setLoading(true);
 
     try {
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
-          model:      "gpt-4o-mini",
+          model:      "claude-sonnet-4-20250514",
           max_tokens: 300,
-          messages: [
-            { role: "system", content: context },
-            ...newMessages.map(m => ({ role: m.role, content: m.content })),
-          ],
+          system:     systemPrompt,
+          messages:   updatedMessages.map(m => ({
+            role:    m.role,
+            content: m.content,
+          })),
         }),
       });
-      const data  = await res.json();
-      const reply = data.choices?.[0]?.message?.content ?? "Sorry, I couldn't get a response. Try again!";
+
+      if (!response.ok) throw new Error(`API error: ${response.status}`);
+
+      const data  = await response.json();
+      const reply =
+        data.content
+          ?.filter(b => b.type === "text")
+          .map(b => b.text)
+          .join("") || "Sorry, I couldn't get a response. Try again!";
+
       setMessages(m => [...m, { role: "assistant", content: reply }]);
-    } catch {
-      setMessages(m => [...m, { role: "assistant", content: "❌ Connection error. Check your API key in Settings." }]);
+    } catch (err) {
+      console.error("AI Coach error:", err);
+      setMessages(m => [
+        ...m,
+        { role: "assistant", content: "❌ Something went wrong. Please try again in a moment." },
+      ]);
     } finally {
       setLoading(false);
     }
@@ -186,42 +207,79 @@ Be warm, concise, and practical. Use CAD dollars. Give actionable advice.
 
   return (
     <SoftCard variant="base" noAnimate style={{ marginTop: "24px" }}>
+      {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "14px" }}>
         <div style={{
           width: "36px", height: "36px", borderRadius: "50%",
           background: `linear-gradient(135deg, ${colors.pinkDeep}, ${colors.mauve})`,
-          display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px"
+          display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px",
         }}>🌸</div>
         <div>
-          <div style={{ fontFamily: typography.fontDisplay, fontSize: "15px", fontWeight: 700, color: colors.text }}>AI Finance Coach</div>
+          <div style={{ fontFamily: typography.fontDisplay, fontSize: "15px", fontWeight: 700, color: colors.text }}>
+            AI Finance Coach
+          </div>
           <div style={{ fontSize: "11px", color: colors.textMuted }}>Powered by your data</div>
         </div>
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "12px", maxHeight: "280px", overflowY: "auto", paddingRight: "4px" }}>
+      {/* Messages */}
+      <div style={{
+        display: "flex", flexDirection: "column", gap: "10px",
+        marginBottom: "12px", maxHeight: "280px", overflowY: "auto", paddingRight: "4px",
+      }}>
         {messages.map((m, i) => (
           <div key={i} style={{
-            alignSelf:             m.role === "user" ? "flex-end" : "flex-start",
-            maxWidth:              "85%",
-            background:            m.role === "user" ? colors.pinkDeep : colors.bgDeep,
-            color:                 m.role === "user" ? "#fff" : colors.text,
-            padding:               "9px 13px",
-            borderRadius:          "12px",
+            alignSelf:               m.role === "user" ? "flex-end" : "flex-start",
+            maxWidth:                "85%",
+            background:              m.role === "user" ? colors.pinkDeep : colors.bgDeep,
+            color:                   m.role === "user" ? "#fff" : colors.text,
+            padding:                 "9px 13px",
+            borderRadius:            "12px",
             borderBottomRightRadius: m.role === "user"      ? "3px"  : "12px",
             borderBottomLeftRadius:  m.role === "assistant" ? "3px"  : "12px",
-            fontSize:              "13px",
-            lineHeight:            1.5,
+            fontSize:                "13px",
+            lineHeight:              1.5,
           }}>
             {m.content}
           </div>
         ))}
         {loading && (
-          <div style={{ alignSelf: "flex-start", background: colors.bgDeep, padding: "9px 13px", borderRadius: "12px", borderBottomLeftRadius: "3px", fontSize: "13px", color: colors.textMuted }}>
+          <div style={{
+            alignSelf: "flex-start", background: colors.bgDeep,
+            padding: "9px 13px", borderRadius: "12px", borderBottomLeftRadius: "3px",
+            fontSize: "13px", color: colors.textMuted,
+          }}>
             Thinking… 🌸
           </div>
         )}
+        <div ref={messagesEndRef} />
       </div>
 
+      {/* Quick chips */}
+      {showChips && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "10px" }}>
+          {QUICK_PROMPTS.map(p => (
+            <button
+              key={p}
+              onClick={() => send(p)}
+              style={{
+                background:   colors.bgDeep,
+                color:        colors.pinkDeep,
+                border:       `1px solid ${colors.border}`,
+                borderRadius: "20px",
+                padding:      "5px 12px",
+                fontSize:     "12px",
+                cursor:       "pointer",
+                transition:   `all ${transitions.base}`,
+              }}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Input */}
       <div style={{ display: "flex", gap: "8px" }}>
         <input
           value={input}
@@ -232,17 +290,20 @@ Be warm, concise, and practical. Use CAD dollars. Give actionable advice.
             flex: 1, padding: "9px 12px",
             background: colors.bgDeep, border: `1.5px solid ${colors.border}`,
             borderRadius: "9px", fontFamily: typography.fontBody,
-            fontSize: "13px", color: colors.text, outline: "none"
+            fontSize: "13px", color: colors.text, outline: "none",
           }}
         />
-        <button onClick={send} disabled={loading || !input.trim()}
+        <button
+          onClick={() => send()}
+          disabled={loading || !input.trim()}
           style={{
             padding: "9px 16px", borderRadius: "9px",
             background: (!loading && input.trim()) ? colors.pinkDeep : colors.bgDeep,
             border: "none", color: (!loading && input.trim()) ? "#fff" : colors.textFaint,
             fontWeight: 700, fontSize: "13px", cursor: loading ? "default" : "pointer",
-            transition: `all ${transitions.base}`
-          }}>
+            transition: `all ${transitions.base}`,
+          }}
+        >
           Send
         </button>
       </div>
@@ -303,8 +364,8 @@ export default function Dashboard() {
     const sent     = rawData.sent     ?? {};
 
     // ── INCOME: only from sent entries for THIS period ───────────────────────
-    const periodSent    = sent[period.k] ?? [];
-    const periodIncome  = periodSent.reduce((s, x) => s + (Number(x.amt) || 0), 0);
+    const periodSent   = sent[period.k] ?? [];
+    const periodIncome = periodSent.reduce((s, x) => s + (Number(x.amt) || 0), 0);
 
     // ── EXPENSES: only expenses with due dates inside THIS period ────────────
     const periodExpenseItems = expenses.filter(e => {
