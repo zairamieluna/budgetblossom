@@ -168,23 +168,22 @@ Be warm, concise, and practical. Use CAD dollars. Give actionable advice. Keep r
     setLoading(true);
 
     try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
+      // ✅ Calls your Netlify function — no CORS, no exposed API key
+      const response = await fetch("/.netlify/functions/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model:      "claude-sonnet-4-20250514",
-          max_tokens: 300,
-          system:     systemPrompt,
-          messages:   updatedMessages.map(m => ({
+          system:   systemPrompt,
+          messages: updatedMessages.map(m => ({
             role:    m.role,
             content: m.content,
           })),
         }),
       });
 
-      if (!response.ok) throw new Error(`API error: ${response.status}`);
+      if (!response.ok) throw new Error(`Function error: ${response.status}`);
 
       const data  = await response.json();
       const reply =
