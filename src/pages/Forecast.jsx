@@ -1,6 +1,6 @@
 /**
  * Forecast.jsx
- * Budget Blossom Forecast V1
+ * Budget Blossom Forecast V3
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -88,7 +88,7 @@ export default function Forecast() {
     >
       <div
         style={{
-          maxWidth: "520px",
+          maxWidth: "540px",
           margin: "0 auto",
         }}
       >
@@ -102,40 +102,87 @@ export default function Forecast() {
           📈 Forecast
         </h1>
 
-        <SoftCard style={{ marginBottom: "16px" }}>
+        <SoftCard style={{ marginBottom: 16 }}>
           <h3>Total Income</h3>
           <h2>{fmt(forecast.income)}</h2>
         </SoftCard>
 
-        <SoftCard style={{ marginBottom: "16px" }}>
+        <SoftCard style={{ marginBottom: 16 }}>
           <h3>Total Expenses</h3>
           <h2>{fmt(forecast.expenses)}</h2>
         </SoftCard>
 
-        <SoftCard style={{ marginBottom: "16px" }}>
-          <h3>Total Saved</h3>
+        <SoftCard style={{ marginBottom: 16 }}>
+          <h3>Total Savings</h3>
           <h2>{fmt(forecast.savings)}</h2>
         </SoftCard>
 
-        <SoftCard style={{ marginBottom: "16px" }}>
+        <SoftCard style={{ marginBottom: 16 }}>
           <h3>Total Card Balance</h3>
           <h2>{fmt(forecast.cards)}</h2>
         </SoftCard>
 
-        <SoftCard variant="highlight">
-          <h3>Remaining Balance</h3>
+        <SoftCard style={{ marginBottom: 16 }}>
+          <h3>Projected Balance</h3>
+
           <h1
             style={{
               color:
-                forecast.remaining >= 0
+                forecast.projectedBalance >= 0
                   ? colors.pinkDeep
                   : colors.critical,
             }}
           >
-            {fmt(forecast.remaining)}
+            {fmt(forecast.projectedBalance)}
           </h1>
 
           <p>{forecast.message}</p>
+        </SoftCard>
+
+        <SoftCard style={{ marginBottom: 16 }}>
+          <h3>Upcoming Bills</h3>
+
+          {forecast.upcomingBills.length === 0 ? (
+            <p>No upcoming bills.</p>
+          ) : (
+            forecast.upcomingBills.map((bill, index) => (
+              <div key={index} style={{ marginBottom: 12 }}>
+                <strong>{bill.name}</strong>
+                <br />
+                {bill.due}
+                <br />
+                {fmt(bill.amount)}
+              </div>
+            ))
+          )}
+        </SoftCard>
+
+        <SoftCard style={{ marginBottom: 16 }}>
+          <h3>Upcoming Income</h3>
+
+          {forecast.upcomingIncome.length === 0 ? (
+            <p>No upcoming income.</p>
+          ) : (
+            forecast.upcomingIncome.map((pay, index) => (
+              <div key={index} style={{ marginBottom: 12 }}>
+                <strong>{pay.source}</strong>
+                <br />
+                {pay.date}
+                <br />
+                {fmt(pay.amount)}
+              </div>
+            ))
+          )}
+        </SoftCard>
+
+        <SoftCard>
+          <h3>Insights</h3>
+
+          <ul>
+            {forecast.insights.map((item, index) => (
+              <li key={index}>{item}</li>
+            ))}
+          </ul>
         </SoftCard>
       </div>
     </div>
