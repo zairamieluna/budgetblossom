@@ -14,6 +14,8 @@ import { supabase } from "../lib/supabaseClient";
 import SoftCard from "../components/common/SoftCard";
 import ProgressBar from "../components/common/ProgressBar";
 import LoadingSpinner from "../components/common/LoadingSpinner";
+import FloatingActionButton from "../components/common/FloatingActionButton";
+import QuickActionsMenu from "../components/common/QuickActionsMenu";
 import { colors, typography, radii, transitions } from "../ui/designTokens";
 
 const fmt = n =>
@@ -68,6 +70,32 @@ function MoodTracker({ rawData, onSave, saving }) {
   }
 
   const currentMood = MOODS.find(m => m.value === selected);
+
+
+function handleQuickAction(action) {
+  switch (action) {
+    case "scan":
+      alert("📷 Smart Scanner will open here.");
+      break;
+    case "expense":
+      alert("💸 Add Expense coming soon.");
+      break;
+    case "income":
+      alert("💰 Add Income coming soon.");
+      break;
+    case "card":
+      alert("💳 Update Card coming soon.");
+      break;
+    case "saving":
+      alert("🏦 Savings coming soon.");
+      break;
+    case "statement":
+      alert("📄 Import Statement coming soon.");
+      break;
+    default:
+      break;
+  }
+}
 
   return (
     <SoftCard variant="base" noAnimate style={{ marginBottom: "16px" }}>
@@ -124,6 +152,8 @@ export default function Dashboard() {
   const [saving,    setSaving]    = useState(false);
   const [error,     setError]     = useState(null);
   const [periodIdx, setPeriodIdx] = useState(currentPeriodIdx);
+
+  const [showQuickActions, setShowQuickActions] = useState(false);
 
   async function saveData(updated) {
     setSaving(true);
@@ -215,6 +245,32 @@ export default function Dashboard() {
   function movePeriod(dir) {
     setPeriodIdx(i => Math.max(0, Math.min(PERIODS.length - 1, i + dir)));
   }
+
+
+function handleQuickAction(action) {
+  switch (action) {
+    case "scan":
+      alert("📷 Smart Scanner will open here.");
+      break;
+    case "expense":
+      alert("💸 Add Expense coming soon.");
+      break;
+    case "income":
+      alert("💰 Add Income coming soon.");
+      break;
+    case "card":
+      alert("💳 Update Card coming soon.");
+      break;
+    case "saving":
+      alert("🏦 Savings coming soon.");
+      break;
+    case "statement":
+      alert("📄 Import Statement coming soon.");
+      break;
+    default:
+      break;
+  }
+}
 
   return (
     <div style={{ minHeight: "100vh", backgroundColor: colors.bg, fontFamily: typography.fontBody, color: colors.text, paddingBottom: "80px" }}>
@@ -384,6 +440,19 @@ export default function Dashboard() {
             )}
           </>
         )}
+
+<FloatingActionButton
+  icon="＋"
+  label="Quick Actions"
+  onClick={() => setShowQuickActions(true)}
+/>
+
+<QuickActionsMenu
+  open={showQuickActions}
+  onClose={() => setShowQuickActions(false)}
+  onSelect={handleQuickAction}
+/>
+
       </div>
     </div>
   );
