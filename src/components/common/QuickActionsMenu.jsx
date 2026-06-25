@@ -2,18 +2,48 @@
  * QuickActionsMenu.jsx
  *
  * Budget Blossom
- * Floating Quick Actions
+ * Premium Quick Actions
  */
 
-import { colors, transitions, typography } from "../../ui/designTokens";
+import { colors, typography, transitions } from "../../ui/designTokens";
 
 const ACTIONS = [
-  { id: "scan", label: "Smart Scan", icon: "📷" },
-  { id: "expense", label: "Add Expense", icon: "💸" },
-  { id: "income", label: "Add Income", icon: "💰" },
-  { id: "card", label: "Update Card", icon: "💳" },
-  { id: "saving", label: "Savings", icon: "🏦" },
-  { id: "statement", label: "Import Statement", icon: "📄" },
+  {
+    id: "scan",
+    title: "Smart Scan",
+    subtitle: "Receipt, Card, PDF",
+    icon: "📷",
+  },
+  {
+    id: "expense",
+    title: "Expense",
+    subtitle: "Add manually",
+    icon: "💸",
+  },
+  {
+    id: "income",
+    title: "Income",
+    subtitle: "Salary or payment",
+    icon: "💰",
+  },
+  {
+    id: "card",
+    title: "Update Card",
+    subtitle: "Credit card balance",
+    icon: "💳",
+  },
+  {
+    id: "saving",
+    title: "Savings",
+    subtitle: "Deposit money",
+    icon: "🏦",
+  },
+  {
+    id: "statement",
+    title: "Statement",
+    subtitle: "Import transactions",
+    icon: "📄",
+  },
 ];
 
 export default function QuickActionsMenu({
@@ -32,6 +62,7 @@ export default function QuickActionsMenu({
           position: "fixed",
           inset: 0,
           background: "rgba(0,0,0,.35)",
+          backdropFilter: "blur(2px)",
           zIndex: 600,
         }}
       />
@@ -42,48 +73,80 @@ export default function QuickActionsMenu({
           position: "fixed",
           right: 20,
           bottom: 165,
-          width: 260,
+          width: 300,
+          borderRadius: 20,
           background: colors.bgCard,
-          borderRadius: 18,
-          padding: 12,
-          boxShadow: "0 16px 40px rgba(0,0,0,.18)",
+          boxShadow: "0 18px 45px rgba(0,0,0,.18)",
+          padding: 14,
           zIndex: 601,
         }}
       >
-        <h3
+        <h2
           style={{
-            marginTop: 4,
-            marginBottom: 12,
+            margin: 6,
+            marginBottom: 16,
             fontFamily: typography.fontDisplay,
+            fontSize: 22,
           }}
         >
           Quick Actions
-        </h3>
+        </h2>
 
-        {ACTIONS.map((action) => (
+        {ACTIONS.map((item) => (
           <button
-            key={action.id}
+            key={item.id}
             onClick={() => {
-              onSelect?.(action.id);
-              onClose?.();
+              onSelect(item.id);
+              onClose();
             }}
             style={{
               width: "100%",
               display: "flex",
               alignItems: "center",
               gap: 14,
-              padding: "12px 14px",
+              padding: 14,
               border: "none",
+              borderRadius: 14,
               background: "transparent",
-              borderRadius: 12,
               cursor: "pointer",
               transition: transitions.base,
-              textAlign: "left",
-              fontSize: 16,
+              marginBottom: 6,
             }}
           >
-            <span style={{ fontSize: 24 }}>{action.icon}</span>
-            {action.label}
+            <div
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: 14,
+                background: colors.pinkPale,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 24,
+              }}
+            >
+              {item.icon}
+            </div>
+
+            <div style={{ textAlign: "left" }}>
+              <div
+                style={{
+                  fontWeight: 700,
+                  fontSize: 15,
+                }}
+              >
+                {item.title}
+              </div>
+
+              <div
+                style={{
+                  fontSize: 12,
+                  opacity: .65,
+                }}
+              >
+                {item.subtitle}
+              </div>
+            </div>
           </button>
         ))}
       </div>
