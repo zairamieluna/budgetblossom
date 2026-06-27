@@ -1,171 +1,92 @@
 /**
  * HealthEngine.js
  *
- * Budget Blossom — Finance Layer
- *
- * Calculates a composite Financial Health Score from
- * the outputs of FinanceEngine and GoalEngine.
- *
- * All inputs are plain numbers — no React, no Supabase.
- * This engine is pure, deterministic, and side-effect free.
- *
- * Score breakdown (each sub-score is 0–100):
- *   savings   — average goal progress across all buckets
- *   bills     — ratio of bills paid vs total due this period
- *   cashflow  — how healthy the income-to-expense ratio is
- *   debt      — placeholder (no debt data yet; defaults to neutral)
- *
- * Composite score weights:
- *   savings   35%
- *   bills     30%
- *   cashflow  25%
- *   debt      10%
- *
- * Ratings:
- *   90–100  Excellent
- *   75–89   Good
- *   55–74   Fair
- *   0–54    Needs Attention
+ * Budget Blossom
+ * Calculates the user's Financial Health Score.
  */
 
 export class HealthEngine {
-  /**
-   * Primary entry point.
-   *
-   * @param {object} finance  — output of FinanceEngine.calculate()
-   * @param {Array}  goals    — output of GoalEngine.buildGoals()
-   * @returns {HealthResult}
-   */
-  static calculate(finance = {}, goals = []) {
-    const savings = HealthEngine._savingsScore(goals);
-    const bills = HealthEngine._billsScore(finance);
-    const cashflow = HealthEngine._cashflowScore(finance);
-    const debt = HealthEngine._debtScore(finance);
+  static calculate({
+    income = 0,
+    expenses = 0,
+    paid = 0,
+    expenseCount = 0,
+    paidCount = 0,
+    goals = [],
+    cards = [],
+  }) {
+    // Bills (25)
+    const billsScore =
+      expenseCount > 0
+        ? (paidCount / expenseCount) * 25
+        : 25;
+
+    // Cash Flow (25)
+    const remaining = income - expenses;
+
+    const cashFlowScore =
+      remaining >= 0
+        ? 25
+        : Math.max(
+            0,
+            25 - Math.abs(remaining) / 50
+          );
+
+    // Goals (25)
+    const goalProgress =
+      goals.length === 0
+        ? 25
+        : goals.reduce(
+            (sum, goal) => sum + (goal.progress || 0),
+            0
+          ) /
+          goals.length /
+          4;
+
+    // Debt (25)
+    let debtScore = 25;
+
+    if (cards.length > 0) {
+      const utilization =
+        cards.reduce(
+          (sum, card) =>
+            sum +
+            ((Number(card.balance) || 0) /
+              Math.max(Number(card.limit) || 1, 1)),
+          0
+        ) / cards.length;
+
+      debtScore = Math.max(
+        0,
+        25 - utilization * 25
+      );
+    }
 
     const score = Math.round(
-      savings * 0.35 +
-      bills   * 0.30 +
-      cashflow * 0.25 +
-      debt    * 0.10
+      billsScore +
+        cashFlowScore +
+        goalProgress +
+        debtScore
     );
+
+    let rating = "Needs Attention";
+
+    if (score >= 90) rating = "Excellent";
+    else if (score >= 75) rating = "Great";
+    else if (score >= 60) rating = "Good";
+    else if (score >= 40) rating = "Fair";
 
     return {
       score,
-      rating: HealthEngine._rating(score),
+      rating,
       breakdown: {
-        savings,
-        bills,
-        cashflow,
-        debt,
+        bills: Math.round(billsScore),
+        cashFlow: Math.round(cashFlowScore),
+        goals: Math.round(goalProgress),
+        debt: Math.round(debtScore),
       },
     };
-  }
-
-  // ─── Sub-score calculators ────────────────────────────
-
-  /**
-   * Savings score: average progress across all goal buckets.
-   * If no goals exist, returns a neutral 50.
-   *
-   * @param {Array} goals — GoalEngine.buildGoals() output
-   * @returns {number} 0–100
-   */
-  static _savingsScore(goals = []) {
-    if (!goals.length) return 50;
-
-    const total = goals.reduce(
-      (sum, g) => sum + (g.progress ?? 0),
-      0
-    );
-
-    return Math.min(100, Math.round(total / goals.length));
-  }
-
-  /**
-   * Bills score: ratio of bills paid to bills due this period.
-   * Perfect score = all bills paid.
-   * No bills due = neutral 100 (nothing to fail).
-   *
-   * @param {object} finance — FinanceEngine output
-   * @returns {number} 0–100
-   */
-  static _billsScore(finance = {}) {
-    const { paidCount = 0, expenseCount = 0 } = finance;
-
-    if (expenseCount === 0) return 100;
-
-    return Math.min(
-      100,
-      Math.round((paidCount / expenseCount) * 100)
-    );
-  }
-
-  /**
-   * Cashflow score: how well income covers expenses.
-   *
-   * Scoring tiers:
-   *   income covers 100%+ of expenses → 100
-   *   income covers 80–99%            → 70–99 (linear)
-   *   income covers 50–79%            → 40–69 (linear)
-   *   income covers < 50%             → 0–39  (linear)
-   *   no income at all                → neutral 50
-   *
-   * @param {object} finance — FinanceEngine output
-   * @returns {number} 0–100
-   */
-  static _cashflowScore(finance = {}) {
-    const { income = 0, expenses = 0 } = finance;
-
-    if (income === 0 && expenses === 0) return 50;
-    if (expenses === 0) return 100;
-
-    const ratio = income / expenses;
-
-    if (ratio >= 1) return 100;
-    if (ratio >= 0.8)
-      return Math.round(70 + ((ratio - 0.8) / 0.2) * 30);
-    if (ratio >= 0.5)
-      return Math.round(40 + ((ratio - 0.5) / 0.3) * 30);
-
-    return Math.max(0, Math.round(ratio * 80));
-  }
-
-  /**
-   * Debt score: placeholder until debt data is tracked.
-   * Returns a neutral 70 — assumed manageable, not perfect.
-   * Replace this when rawData.debt is available.
-   *
-   * @returns {number} 0–100
-   */
-  static _debtScore() {
-    return 70;
-  }
-
-  // ─── Rating label ─────────────────────────────────────
-
-  /**
-   * Maps a composite score to a human-readable rating.
-   *
-   * @param {number} score — 0 to 100
-   * @returns {string}
-   */
-  static _rating(score) {
-    if (score >= 90) return "Excellent";
-    if (score >= 75) return "Good";
-    if (score >= 55) return "Fair";
-    return "Needs Attention";
   }
 }
 
 export default HealthEngine;
-
-/**
- * @typedef {object} HealthResult
- * @property {number} score           — composite 0–100
- * @property {string} rating          — "Excellent" | "Good" | "Fair" | "Needs Attention"
- * @property {object} breakdown
- * @property {number} breakdown.savings   — 0–100
- * @property {number} breakdown.bills     — 0–100
- * @property {number} breakdown.cashflow  — 0–100
- * @property {number} breakdown.debt      — 0–100
- */
