@@ -1,18 +1,17 @@
 /**
  * BottomNav.jsx
- * Mobile-first bottom navigation bar.
+ * Budget Blossom v1
+ * Mobile-first bottom navigation.
  */
+
 import { typography, transitions } from "../../ui/designTokens";
 
 const NAV_ITEMS = [
   { id: "dashboard", label: "Home", emoji: "🏠" },
-  { id: "expenses", label: "Expenses", emoji: "💸" },
-  { id: "income", label: "Income", emoji: "💰" },
-  { id: "cards", label: "Cards", emoji: "💳" },
-  { id: "savings", label: "Savings", emoji: "🫙" },
-  { id: "forecast", label: "Forecast", emoji: "📈" },
-  { id: "calendar", label: "Calendar", emoji: "📅" },
-  { id: "settings", label: "Settings", emoji: "⚙️" },
+  { id: "money", label: "Money", emoji: "💳" },
+  { id: "goals", label: "Goals", emoji: "🎯" },
+  { id: "scan", label: "Scan", emoji: "📷" },
+  { id: "more", label: "More", emoji: "☰" },
 ];
 
 export default function BottomNav({ activePage, onNavigate }) {
@@ -48,12 +47,12 @@ export default function BottomNav({ activePage, onNavigate }) {
               flexDirection: "column",
               alignItems: "center",
               justifyContent: "center",
-              gap: "2px",
-              flex: "1 1 0",
+              gap: "3px",
+              flex: 1,
               height: "100%",
               padding: "6px 2px 4px",
               border: "none",
-              borderRadius: "10px",
+              borderRadius: "12px",
               cursor: "pointer",
               background: isActive
                 ? "var(--primary-bg)"
@@ -61,34 +60,30 @@ export default function BottomNav({ activePage, onNavigate }) {
               color: isActive
                 ? "var(--nav-active)"
                 : "var(--nav-inactive)",
-              fontSize: "8.5px",
+              fontSize: "9px",
               fontWeight: isActive
                 ? typography.bold
                 : typography.medium,
               letterSpacing: "0.04em",
               textTransform: "uppercase",
               transition: `all ${transitions.base}`,
-              overflow: "hidden",
-              whiteSpace: "nowrap",
             }}
           >
             <span
               style={{
-                fontSize: "18px",
+                fontSize: "20px",
                 lineHeight: 1,
-                filter: isActive
-                  ? "none"
-                  : "grayscale(0.3) opacity(0.65)",
                 transform: isActive
                   ? "scale(1.1)"
                   : "scale(1)",
-                transition: `transform ${transitions.base}`,
+                opacity: isActive ? 1 : 0.7,
+                transition: `all ${transitions.base}`,
               }}
             >
               {item.emoji}
             </span>
 
-            {item.label}
+            <span>{item.label}</span>
           </button>
         );
       })}
