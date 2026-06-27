@@ -2,30 +2,28 @@
  * FinanceEngine.js
  *
  * Budget Blossom
- * Single source of truth for financial calculations.
- *
- * Version 1
+ * Financial orchestration layer.
  */
 
+import { calculateIncome } from "./calculators/income";
+import { calculateExpenses } from "./calculators/expenses";
+import { calculateSavings } from "./calculators/savings";
+import { calculateCashflow } from "./calculators/cashflow";
+
 export class FinanceEngine {
-  /**
-   * Calculate financial summary for a period.
-   *
-   * @param {Object} rawData
-   * @param {Object} period
-   * @returns {Object}
-   */
   static calculate(rawData = {}, period) {
     const expenses = rawData.expenses ?? [];
     const savings = rawData.savings ?? [];
     const sent = rawData.sent ?? {};
 
-    const periodIncome = (sent[period?.k] ?? []).reduce(
-      (sum, item) => sum + (Number(item.amt) || 0),
-      0
+    const periodIncome = calculateIncome(
+      (sent[period?.k] ?? []).map(item => ({
+        type: "income",
+        amount: Number(item.amt) || 0,
+      }))
     );
 
-    const periodExpenses = expenses.filter((expense) => {
+    const periodExpenses = expenses.filter(expense => {
       if (!expense.due) return false;
 
       const dueDate = new Date(expense.due + "T12:00:00");
@@ -36,15 +34,15 @@ export class FinanceEngine {
       );
     });
 
-    const totalExpenses = periodExpenses.reduce(
-      (sum, expense) =>
-        sum +
-        (Number(expense.amount || expense.amt) || 0),
-      0
+    const totalExpenses = calculateExpenses(
+      periodExpenses.map(expense => ({
+        type: "expense",
+        amount: Number(expense.amount || expense.amt) || 0,
+      }))
     );
 
     const paidExpenses = periodExpenses
-      .filter((expense) => expense.paid)
+      .filter(expense => expense.paid)
       .reduce(
         (sum, expense) =>
           sum +
@@ -58,30 +56,41 @@ export class FinanceEngine {
       0
     );
 
+    const remaining = calculateSavings(
+      periodIncome,
+      totalExpenses
+    );
+
     return {
       income: periodIncome,
 
       expenses: totalExpenses,
 
-      remaining: periodIncome - totalExpenses,
+      remaining,
+
+      cashflow: calculateCashflow(
+        periodIncome,
+        totalExpenses
+      ),
 
       paid: paidExpenses,
 
       paidCount: periodExpenses.filter(
-        (expense) => expense.paid
+        expense => expense.paid
       ).length,
 
       expenseCount: periodExpenses.length,
 
       totalSaved,
 
-      savingsBuckets: savings.map((bucket) => ({
+      savingsBuckets: savings.map(bucket => ({
         id: bucket.id,
         label: bucket.name,
         saved: Number(bucket.saved) || 0,
         target: Number(bucket.target) || 0,
         monthly: Number(bucket.monthly) || 0,
         color: bucket.color,
+
         pct:
           bucket.target > 0
             ? Math.min(
