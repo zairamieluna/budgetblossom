@@ -1,125 +1,113 @@
 /**
- * src/services/ocr/FieldExtractor.js
+ * FieldExtractor.js
  *
  * Budget Blossom
- * Smart Scanner
+ * Smart Field Extraction Engine
  *
- * Converts OCR text into structured financial data.
- *
- * This file contains NO API calls.
- * It simply extracts fields from text.
+ * V1
  */
 
-export class FieldExtractor {
-  /**
-   * Extract common financial fields from OCR text.
-   *
-   * @param {string} text
-   * @returns {Object}
-   */
-  extract(text = "") {
-    const source = text.replace(/\r/g, "");
+function extractMoney(text, label) {
+  const regex = new RegExp(
+    `${label}[\\s:$]*([0-9,]+\\.?[0-9]*)`,
+    "i"
+  );
 
-    return {
-      bank: this.extractBank(source),
-      balance: this.extractMoney(source, [
-        "current balance",
-        "balance",
-        "statement balance",
-      ]),
-      availableCredit: this.extractMoney(source, [
-        "available credit",
-        "available",
-      ]),
-      creditLimit: this.extractMoney(source, [
-        "credit limit",
-        "limit",
-      ]),
-      minimumPayment: this.extractMoney(source, [
-        "minimum payment",
-        "minimum due",
-      ]),
-      dueDate: this.extractDate(source),
-      statementDate: this.extractStatementDate(source),
-    };
-  }
+  const match = text.match(regex);
 
-  // --------------------------------------------------
+  if (!match) return null;
 
-  extractBank(text) {
-    const banks = [
-      "CIBC",
-      "RBC",
-      "TD",
-      "Scotiabank",
-      "BMO",
-      "PC Financial",
-      "Simplii",
-      "Tangerine",
-      "American Express",
-      "Amex",
-    ];
-
-    const upper = text.toUpperCase();
-
-    const match = banks.find((bank) =>
-      upper.includes(bank.toUpperCase())
-    );
-
-    return match || null;
-  }
-
-  // --------------------------------------------------
-
-  extractMoney(text, labels = []) {
-    const lines = text.split("\n");
-
-    for (const line of lines) {
-      for (const label of labels) {
-        if (line.toLowerCase().includes(label.toLowerCase())) {
-          const match = line.match(/\$?\s?([\d,]+\.\d{2})/);
-
-          if (match) {
-            return Number(match[1].replace(/,/g, ""));
-          }
-        }
-      }
-    }
-
-    return null;
-  }
-
-  // --------------------------------------------------
-
-  extractDate(text) {
-    const match = text.match(
-      /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}\b/i
-    );
-
-    return match ? match[0] : null;
-  }
-
-  // --------------------------------------------------
-
-  extractStatementDate(text) {
-    const lines = text.split("\n");
-
-    for (const line of lines) {
-      if (line.toLowerCase().includes("statement")) {
-        const match = line.match(
-          /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}\b/i
-        );
-
-        if (match) {
-          return match[0];
-        }
-      }
-    }
-
-    return null;
-  }
+  return Number(
+    match[1].replace(/,/g, "")
+  );
 }
 
-const fieldExtractor = new FieldExtractor();
+function extractDate(text, label) {
+  const regex = new RegExp(
+    `${label}[\\s:]*([A-Za-z0-9 ,/-]+)`,
+    "i"
+  );
 
-export default fieldExtractor;
+  const match = text.match(regex);
+
+  return match ? match[1].trim() : null;
+}
+
+export function extractFields(documentType, text = "") {
+  switch (documentType) {
+    case "credit-card":
+      return {
+        bank: null,
+
+        cardName: null,
+
+        balance: extractMoney(
+          text,
+          "statement balance"
+        ),
+
+        creditLimit: extractMoney(
+          text,
+          "credit limit"
+        ),
+
+        availableCredit: extractMoney(
+          text,
+          "available credit"
+        ),
+
+        minimumPayment: extractMoney(
+          text,
+          "minimum payment"
+        ),
+
+        dueDate: extractDate(
+          text,
+          "payment due"
+        ),
+      };
+
+    case "receipt":
+      return {
+        merchant: null,
+
+        subtotal: extractMoney(
+          text,
+          "subtotal"
+        ),
+
+        tax: extractMoney(
+          text,
+          "tax"
+        ),
+
+        total: extractMoney(
+          text,
+          "total"
+        ),
+
+        date: extractDate(
+          text,
+          "date"
+        ),
+      };
+
+    case "statement":
+      return {
+        openingBalance: extractMoney(
+          text,
+          "opening balance"
+        ),
+
+        closingBalance: extractMoney(
+          text,
+          "closing balance"
+        ),
+
+        transactions: [],
+      };
+
+    default:
+      return {};
+  }
+}
