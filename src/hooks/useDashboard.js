@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { supabase } from "../lib/supabaseClient";
 import FinanceEngine from "../finance/FinanceEngine";
+
+import DashboardService from "../services/dashboard/DashboardService";
 
 import {
     PERIODS,
@@ -31,20 +32,8 @@ export default function useDashboard() {
 
         try {
 
-            const { data, error } = await supabase
-                .from("user_data")
-                .select("data")
-                .limit(1)
-                .single();
-
-            if (error) throw error;
-
-            const blob = data?.data?.budgetsbloom;
-
             const parsed =
-                typeof blob === "string"
-                    ? JSON.parse(blob)
-                    : blob ?? {};
+                await DashboardService.loadDashboard();
 
             setRawData(parsed);
 
@@ -76,25 +65,7 @@ export default function useDashboard() {
 
         try {
 
-            const { data: row } = await supabase
-                .from("user_data")
-                .select("id")
-                .limit(1)
-                .single();
-
-            await supabase
-                .from("user_data")
-                .update({
-
-                    data: {
-
-                        budgetsbloom:
-                            JSON.stringify(updatedData),
-
-                    },
-
-                })
-                .eq("id", row.id);
+            await DashboardService.saveDashboard(updatedData);
 
             setRawData(updatedData);
 
