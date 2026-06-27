@@ -1,56 +1,34 @@
 /**
- * src/services/ocr/OCRService.js
+ * GoogleVisionProvider.js
  *
  * Budget Blossom
- * Smart Scanner Service
+ * OCR Provider
  *
- * This service is responsible for sending uploaded
- * documents to whichever OCR provider is configured.
- *
- * All UI pages should ONLY call this service.
- * They should never call an OCR API directly.
+ * Currently mocked.
+ * Later this file will call
+ * Google Cloud Vision API.
  */
 
-export class OCRService {
-  constructor(provider = null) {
-    this.provider = provider;
-  }
+export default class GoogleVisionProvider {
+  async scan(file) {
+    // simulate upload
 
-  /**
-   * Scan a document.
-   *
-   * @param {File} file
-   * @returns {Promise<Object>}
-   */
-  async scanDocument(file) {
-    if (!file) {
-      throw new Error("No file selected.");
-    }
+    await new Promise((resolve) =>
+      setTimeout(resolve, 1200)
+    );
 
-    if (!this.provider) {
-      throw new Error(
-        "No OCR provider configured."
-      );
-    }
+    return {
+      provider: "google-vision",
 
-    return this.provider.scan(file);
-  }
+      filename: file.name,
 
-  /**
-   * Returns true if OCR provider exists.
-   */
-  isReady() {
-    return !!this.provider;
-  }
+      documentType: "unknown",
 
-  /**
-   * Change OCR provider.
-   */
-  setProvider(provider) {
-    this.provider = provider;
+      confidence: 0.98,
+
+      text: "",
+
+      raw: {},
+    };
   }
 }
-
-const ocrService = new OCRService();
-
-export default ocrService;
