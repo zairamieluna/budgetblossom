@@ -1,105 +1,76 @@
 /**
- * src/services/ocr/ValidationEngine.js
+ * ValidationEngine.js
  *
  * Budget Blossom
- * Smart Scanner
+ * OCR Validation Engine
  *
- * Validates extracted OCR data before it is saved.
- *
- * This prevents bad OCR reads from corrupting
- * the user's financial data.
+ * V2
  */
 
-export class ValidationEngine {
-  /**
-   * Validate extracted document.
-   *
-   * @param {Object} data
-   * @returns {{
-   *   valid:boolean,
-   *   errors:string[]
-   * }}
-   */
-  validate(data = {}) {
-    const errors = [];
-
-    // ----------------------------------------
-    // Balance
-    // ----------------------------------------
-
-    if (
-      data.balance !== null &&
-      data.balance !== undefined &&
-      (isNaN(data.balance) || data.balance < 0)
-    ) {
-      errors.push("Balance must be a positive number.");
-    }
-
-    // ----------------------------------------
-    // Credit Limit
-    // ----------------------------------------
-
-    if (
-      data.creditLimit !== null &&
-      data.creditLimit !== undefined &&
-      (isNaN(data.creditLimit) || data.creditLimit < 0)
-    ) {
-      errors.push("Credit limit is invalid.");
-    }
-
-    // ----------------------------------------
-    // Minimum Payment
-    // ----------------------------------------
-
-    if (
-      data.minimumPayment !== null &&
-      data.minimumPayment !== undefined &&
-      (isNaN(data.minimumPayment) || data.minimumPayment < 0)
-    ) {
-      errors.push("Minimum payment is invalid.");
-    }
-
-    // ----------------------------------------
-    // Available Credit
-    // ----------------------------------------
-
-    if (
-      data.availableCredit !== null &&
-      data.availableCredit !== undefined &&
-      (isNaN(data.availableCredit) || data.availableCredit < 0)
-    ) {
-      errors.push("Available credit is invalid.");
-    }
-
-    // ----------------------------------------
-    // Due Date
-    // ----------------------------------------
-
-    if (
-      data.dueDate &&
-      typeof data.dueDate !== "string"
-    ) {
-      errors.push("Due date is invalid.");
-    }
-
-    // ----------------------------------------
-    // Statement Date
-    // ----------------------------------------
-
-    if (
-      data.statementDate &&
-      typeof data.statementDate !== "string"
-    ) {
-      errors.push("Statement date is invalid.");
-    }
-
-    return {
-      valid: errors.length === 0,
-      errors,
-    };
-  }
+function isPositiveNumber(value) {
+  return typeof value === "number" && !isNaN(value) && value >= 0;
 }
 
-const validationEngine = new ValidationEngine();
+export function validateExtractedData(documentType, fields) {
+  const errors = [];
+  const warnings = [];
 
-export default validationEngine;
+  switch (documentType) {
+    case "credit-card": {
+      if (!isPositiveNumber(fields.balance)) {
+        errors.push("Missing or invalid card balance.");
+      }
+
+      if (!isPositiveNumber(fields.creditLimit)) {
+        warnings.push("Credit limit could not be detected.");
+      }
+
+      if (!isPositiveNumber(fields.availableCredit)) {
+        warnings.push("Available credit was not detected.");
+      }
+
+      if (!isPositiveNumber(fields.minimumPayment)) {
+        warnings.push("Minimum payment was not detected.");
+      }
+
+      if (!fields.dueDate) {
+        warnings.push("Due date was not detected.");
+      }
+
+      break;
+    }
+
+    case "receipt": {
+      if (!isPositiveNumber(fields.total)) {
+        errors.push("Receipt total could not be detected.");
+      }
+
+      if (!fields.merchant) {
+        warnings.push("Merchant name was not detected.");
+      }
+
+      break;
+    }
+
+    case "statement": {
+      if (!isPositiveNumber(fields.openingBalance)) {
+        warnings.push("Opening balance missing.");
+      }
+
+      if (!isPositiveNumber(fields.closingBalance)) {
+        warnings.push("Closing balance missing.");
+      }
+
+      break;
+    }
+
+    default:
+      warnings.push("Unknown document type.");
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings,
+  };
+}
