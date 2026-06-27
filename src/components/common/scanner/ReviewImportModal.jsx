@@ -3,24 +3,15 @@
  *
  * Budget Blossom
  * Smart Import Review
+ *
+ * Version 2
+ * - Editable fields
+ * - User can correct OCR mistakes
+ * - Returns edited values on import
  */
 
+import { useEffect, useState } from "react";
 import { colors, typography } from "../../ui/designTokens";
-
-function formatValue(value) {
-  if (value === null || value === undefined || value === "") {
-    return "—";
-  }
-
-  if (typeof value === "number") {
-    return new Intl.NumberFormat("en-CA", {
-      style: "currency",
-      currency: "CAD",
-    }).format(value);
-  }
-
-  return value;
-}
 
 export default function ReviewImportModal({
   open,
@@ -28,21 +19,46 @@ export default function ReviewImportModal({
   onCancel,
   onImport,
 }) {
+  const [fields, setFields] = useState({});
+
+  useEffect(() => {
+    if (document?.fields) {
+      setFields(document.fields);
+    }
+  }, [document]);
+
   if (!open || !document) return null;
 
-  const fields = document.fields || {};
+  function handleChange(key, value) {
+    setFields((prev) => ({
+      ...prev,
+      [key]: value,
+    }));
+  }
+
+  function handleSave() {
+    onImport?.({
+      ...document,
+      fields,
+    });
+  }
 
   return (
     <>
+      {/* Overlay */}
+
       <div
         onClick={onCancel}
         style={{
           position: "fixed",
           inset: 0,
           background: "rgba(0,0,0,.45)",
+          backdropFilter: "blur(4px)",
           zIndex: 900,
         }}
       />
+
+      {/* Modal */}
 
       <div
         style={{
@@ -55,9 +71,9 @@ export default function ReviewImportModal({
           background: colors.bgCard,
           borderRadius: 24,
           padding: 24,
-          zIndex: 901,
           maxHeight: "85vh",
           overflowY: "auto",
+          zIndex: 901,
         }}
       >
         <h2
@@ -71,24 +87,24 @@ export default function ReviewImportModal({
 
         <p
           style={{
-            opacity: .7,
-            marginBottom: 20,
+            opacity: 0.7,
+            marginBottom: 24,
           }}
         >
-          Please review the detected information before importing.
+          Review and edit the detected information before saving.
         </p>
 
         <div
           style={{
+            marginBottom: 24,
             padding: 16,
-            borderRadius: 16,
             background: colors.bg,
-            marginBottom: 20,
+            borderRadius: 16,
           }}
         >
           <strong>Document Type</strong>
 
-          <div style={{ marginTop: 6 }}>
+          <div style={{ marginTop: 8 }}>
             {document.documentType}
           </div>
         </div>
@@ -97,26 +113,41 @@ export default function ReviewImportModal({
           <div
             key={key}
             style={{
-              display: "flex",
-              justifyContent: "space-between",
-              padding: "12px 0",
-              borderBottom: "1px solid #eee",
+              marginBottom: 18,
             }}
           >
-            <strong>
-              {key}
-            </strong>
+            <label
+              style={{
+                display: "block",
+                marginBottom: 6,
+                fontWeight: 600,
+              }}
+            >
+              {formatLabel(key)}
+            </label>
 
-            <span>
-              {formatValue(value)}
-            </span>
+            <input
+              value={value ?? ""}
+              onChange={(e) =>
+                handleChange(key, e.target.value)
+              }
+              style={{
+                width: "100%",
+                padding: "12px 14px",
+                borderRadius: 12,
+                border: `1px solid ${colors.border}`,
+                background: colors.bg,
+                fontSize: 15,
+                boxSizing: "border-box",
+              }}
+            />
           </div>
         ))}
 
         {document.validation?.warnings?.length > 0 && (
           <div
             style={{
-              marginTop: 24,
+              marginTop: 12,
               padding: 16,
               background: "#FFF7E8",
               borderRadius: 16,
@@ -125,8 +156,10 @@ export default function ReviewImportModal({
             <strong>Warnings</strong>
 
             <ul>
-              {document.validation.warnings.map((w) => (
-                <li key={w}>{w}</li>
+              {document.validation.warnings.map((warning) => (
+                <li key={warning}>
+                  {warning}
+                </li>
               ))}
             </ul>
           </div>
@@ -135,7 +168,7 @@ export default function ReviewImportModal({
         {document.validation?.errors?.length > 0 && (
           <div
             style={{
-              marginTop: 24,
+              marginTop: 16,
               padding: 16,
               background: "#FFECEC",
               borderRadius: 16,
@@ -144,8 +177,10 @@ export default function ReviewImportModal({
             <strong>Errors</strong>
 
             <ul>
-              {document.validation.errors.map((e) => (
-                <li key={e}>{e}</li>
+              {document.validation.errors.map((error) => (
+                <li key={error}>
+                  {error}
+                </li>
               ))}
             </ul>
           </div>
@@ -163,8 +198,8 @@ export default function ReviewImportModal({
             style={{
               flex: 1,
               padding: 14,
-              borderRadius: 14,
               border: "none",
+              borderRadius: 14,
               cursor: "pointer",
             }}
           >
@@ -172,24 +207,28 @@ export default function ReviewImportModal({
           </button>
 
           <button
-            onClick={onImport}
-            disabled={!document.validation?.valid}
+            onClick={handleSave}
             style={{
               flex: 1,
               padding: 14,
-              borderRadius: 14,
               border: "none",
+              borderRadius: 14,
               cursor: "pointer",
               background: colors.pink,
               color: "#fff",
               fontWeight: 700,
-              opacity: document.validation?.valid ? 1 : .5,
             }}
           >
-            Import
+            Save
           </button>
         </div>
       </div>
     </>
   );
+}
+
+function formatLabel(text) {
+  return text
+    .replace(/([A-Z])/g, " $1")
+    .replace(/^./, (char) => char.toUpperCase());
 }
