@@ -1,122 +1,84 @@
 /**
  * SummaryCards.jsx
  *
- * Budget Blossom
+ * Budget Blossom — Dashboard Components
+ *
+ * Three top-line metric cards:
+ *   Income | Expenses | Remaining
+ *
+ * Answers "How am I doing?" within 5 seconds of opening the app.
+ * Remaining is color-coded: green when positive, amber when tight,
+ * red when negative.
+ *
+ * Props:
+ *   finance  {object} — FinanceEngine output
  */
 
-import SoftCard from "../common/SoftCard";
-import { colors, typography } from "../../ui/designTokens";
+import React from "react";
+import { formatCurrency } from "../../utils/currency";
 
-const fmt = (n) =>
-  new Intl.NumberFormat("en-CA", {
-    style: "currency",
-    currency: "CAD",
-    maximumFractionDigits: 0,
-  }).format(n);
+const CARDS = [
+  {
+    key:       "income",
+    label:     "Income",
+    icon:      "💰",
+    className: "bb-summary-income",
+  },
+  {
+    key:       "expenses",
+    label:     "Expenses",
+    icon:      "💸",
+    className: "bb-summary-expenses",
+  },
+  {
+    key:       "remaining",
+    label:     "Remaining",
+    icon:      "🏦",
+    className: "bb-summary-remaining",
+  },
+];
 
-export default function SummaryCards({
-  income,
-  expenses,
-  paid,
-  incomeCount,
-  expenseCount,
-  paidCount,
-}) {
-  const cards = [
-    {
-      label: "Income",
-      value: income,
-      color: colors.gold,
-      emoji: "💛",
-      sub:
-        incomeCount > 0
-          ? `${incomeCount} entr${
-              incomeCount === 1 ? "y" : "ies"
-            } sent`
-          : "nothing sent yet",
-    },
-    {
-      label: "Expenses",
-      value: expenses,
-      color: colors.pink,
-      emoji: "📄",
-      sub: `${expenseCount} bill${
-        expenseCount !== 1 ? "s" : ""
-      } this period`,
-    },
-    {
-      label: "Paid",
-      value: paid,
-      color: colors.teal ?? "#3a6b4e",
-      emoji: "✅",
-      sub: `${paidCount}/${expenseCount} paid`,
-    },
-  ];
+export default function SummaryCards({ finance = {} }) {
+  if (!finance) return null;
 
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "1fr 1fr 1fr",
-        gap: "8px",
-        marginBottom: "16px",
-      }}
-    >
-      {cards.map((card) => (
-        <SoftCard
-          key={card.label}
-          variant="base"
-          padding="12px 10px"
-          noAnimate
-          style={{
-            textAlign: "center",
-          }}
-        >
-          <div
-            style={{
-              fontSize: "16px",
-              marginBottom: "4px",
-            }}
-          >
-            {card.emoji}
-          </div>
+    <div className="bb-summary-cards">
+      {CARDS.map(({ key, label, icon, className }) => {
+        const value = finance[key] ?? 0;
+        const accent = key === "remaining"
+          ? remainingAccent(value)
+          : "";
 
+        return (
           <div
-            style={{
-              fontSize: "9px",
-              fontWeight: 700,
-              color: colors.textMuted,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              marginBottom: "2px",
-            }}
+            key={key}
+            className={`bb-summary-card ${className} ${accent}`}
           >
-            {card.label}
-          </div>
+            <span className="bb-summary-icon" aria-hidden="true">
+              {icon}
+            </span>
 
-          <div
-            style={{
-              fontFamily:
-                typography.fontDisplay,
-              fontSize: "14px",
-              fontWeight: 700,
-              color: card.color,
-            }}
-          >
-            {fmt(card.value)}
+            <div className="bb-summary-body">
+              <span className="bb-summary-label">{label}</span>
+              <span className="bb-summary-value">
+                {formatCurrency(value)}
+              </span>
+            </div>
           </div>
-
-          <div
-            style={{
-              fontSize: "9px",
-              color: colors.textMuted,
-              marginTop: "3px",
-            }}
-          >
-            {card.sub}
-          </div>
-        </SoftCard>
-      ))}
+        );
+      })}
     </div>
   );
+}
+
+// ─── Helpers ─────────────────────────────────────────────
+
+/**
+ * Returns a CSS modifier class based on remaining value.
+ * Signals to the user whether their cushion is healthy.
+ */
+function remainingAccent(value) {
+  if (value > 200)  return "bb-remaining--positive";
+  if (value >= 0)   return "bb-remaining--tight";
+  return "bb-remaining--negative";
 }
