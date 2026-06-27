@@ -1,9 +1,12 @@
 /**
  * App.jsx
- * Root app component with bottom-nav page routing.
+ * Root app component with bottom navigation.
  */
+
 import { useState } from "react";
+
 import "./styles/globals.css";
+
 import { ThemeProvider } from "./context/ThemeContext";
 
 import BottomNav from "./components/common/BottomNav";
@@ -31,11 +34,13 @@ const PAGES = {
 export default function App() {
   const [activePage, setActivePage] = useState("dashboard");
 
-  const PageComponent = PAGES[activePage] || Dashboard;
+  const CurrentPage =
+    PAGES[activePage] ?? Dashboard;
 
   return (
     <ThemeProvider>
-      <PageComponent />
+      <CurrentPage />
+
       <BottomNav
         activePage={activePage}
         onNavigate={setActivePage}
