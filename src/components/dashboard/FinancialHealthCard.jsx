@@ -1,170 +1,164 @@
 /**
  * FinancialHealthCard.jsx
  *
- * Budget Blossom — Dashboard Components
- *
- * Displays the user's Financial Health Score with:
- *   • A large score number and rating label
- *   • An SVG arc ring that fills to the score percentage
- *   • Four sub-score bars: Savings, Bills, Cash Flow, Debt
- *
- * Props:
- *   health  {object} — HealthEngine output
- *             { score, rating, breakdown: { savings, bills, cashflow, debt } }
+ * Budget Blossom
+ * Displays the user's overall Financial Health.
  */
 
-import React from "react";
+import SoftCard from "../common/SoftCard";
+import { colors, typography } from "../../ui/designTokens";
 
-// Sub-score row definitions
-const BREAKDOWN_ITEMS = [
-  { key: "savings",  label: "Savings",    icon: "🏦" },
-  { key: "bills",    label: "Bills",      icon: "📋" },
-  { key: "cashflow", label: "Cash Flow",  icon: "💚" },
-  { key: "debt",     label: "Debt",       icon: "🔒" },
-];
+const RATING_COLORS = {
+  Excellent: "#16A34A",
+  Great: "#22C55E",
+  Good: "#F59E0B",
+  Fair: "#FB923C",
+  "Needs Attention": "#EF4444",
+};
 
-export default function FinancialHealthCard({ health = null }) {
-  if (!health) return <HealthCardSkeleton />;
+export default function FinancialHealthCard({ health }) {
+  if (!health) return null;
 
-  const { score, rating, breakdown = {} } = health;
+  const color =
+    RATING_COLORS[health.rating] || colors.pinkDeep;
 
   return (
-    <div className="bb-card bb-health-card">
+    <SoftCard
+      variant="highlight"
+      style={{
+        marginBottom: "16px",
+      }}
+      noAnimate
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: "18px",
+        }}
+      >
+        <div>
+          <div
+            style={{
+              fontSize: "11px",
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              color: colors.textMuted,
+              marginBottom: "4px",
+            }}
+          >
+            🌸 Financial Health
+          </div>
 
-      {/* Header */}
-      <div className="bb-card-header">
-        <h2 className="bb-card-title">Financial Health</h2>
-      </div>
+          <div
+            style={{
+              fontFamily: typography.fontDisplay,
+              fontSize: "36px",
+              fontWeight: 700,
+              color,
+              lineHeight: 1,
+            }}
+          >
+            {health.score}
+          </div>
 
-      {/* Score ring + label */}
-      <div className="bb-health-score-area">
-        <ScoreRing score={score} />
+          <div
+            style={{
+              fontSize: "14px",
+              fontWeight: 600,
+              color,
+              marginTop: "4px",
+            }}
+          >
+            {health.rating}
+          </div>
+        </div>
 
-        <div className="bb-health-score-label">
-          <span className="bb-health-score-number">{score}</span>
-          <span className="bb-health-rating">{rating}</span>
+        <div
+          style={{
+            width: "90px",
+            height: "90px",
+            borderRadius: "50%",
+            border: `8px solid ${color}`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: "26px",
+            fontWeight: 700,
+            color,
+            background: "#fff",
+          }}
+        >
+          {health.score}
         </div>
       </div>
 
-      {/* Sub-score breakdown */}
-      <div className="bb-health-breakdown">
-        {BREAKDOWN_ITEMS.map(({ key, label, icon }) => (
-          <BreakdownRow
-            key={key}
-            label={label}
-            icon={icon}
-            value={breakdown[key] ?? 0}
-          />
-        ))}
-      </div>
-
-    </div>
-  );
-}
-
-// ─── Score Ring ───────────────────────────────────────────
-
-/**
- * SVG arc ring. Fills from 0 to score%.
- * Uses stroke-dasharray trick for the progress arc.
- */
-function ScoreRing({ score = 0 }) {
-  const radius      = 42;
-  const cx          = 54;
-  const cy          = 54;
-  const circumference = 2 * Math.PI * radius;
-  const filled      = circumference * (score / 100);
-  const gap         = circumference - filled;
-
-  const color = scoreColor(score);
-
-  return (
-    <svg
-      className="bb-health-ring"
-      viewBox="0 0 108 108"
-      aria-label={`Health score: ${score} out of 100`}
-      role="img"
-    >
-      {/* Track */}
-      <circle
-        cx={cx} cy={cy} r={radius}
-        fill="none"
-        stroke="var(--bb-health-track, #e8e4f0)"
-        strokeWidth="10"
-      />
-
-      {/* Progress arc */}
-      <circle
-        cx={cx} cy={cy} r={radius}
-        fill="none"
-        stroke={color}
-        strokeWidth="10"
-        strokeLinecap="round"
-        strokeDasharray={`${filled} ${gap}`}
-        transform={`rotate(-90 ${cx} ${cy})`}
-        style={{ transition: "stroke-dasharray 0.6s ease" }}
-      />
-    </svg>
-  );
-}
-
-// ─── Breakdown Row ────────────────────────────────────────
-
-function BreakdownRow({ label, icon, value }) {
-  return (
-    <div className="bb-health-row">
-      <span className="bb-health-row-icon" aria-hidden="true">
-        {icon}
-      </span>
-
-      <span className="bb-health-row-label">{label}</span>
-
       <div
-        className="bb-health-bar-track"
-        role="progressbar"
-        aria-valuenow={value}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-label={`${label}: ${value}%`}
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: "12px",
+        }}
       >
-        <div
-          className="bb-health-bar-fill"
-          style={{
-            width:            `${value}%`,
-            backgroundColor:  scoreColor(value),
-            transition:       "width 0.5s ease",
-          }}
+        <Metric
+          label="Bills"
+          value={health.breakdown.bills}
+        />
+
+        <Metric
+          label="Cash Flow"
+          value={health.breakdown.cashFlow}
+        />
+
+        <Metric
+          label="Goals"
+          value={health.breakdown.goals}
+        />
+
+        <Metric
+          label="Debt"
+          value={health.breakdown.debt}
         />
       </div>
-
-      <span className="bb-health-row-value">{value}</span>
-    </div>
+    </SoftCard>
   );
 }
 
-// ─── Skeleton ─────────────────────────────────────────────
-
-function HealthCardSkeleton() {
+function Metric({ label, value }) {
   return (
-    <div className="bb-card bb-health-card bb-skeleton">
-      <div className="bb-skeleton-ring" />
-      <div className="bb-skeleton-bars">
-        {[1, 2, 3, 4].map(i => (
-          <div key={i} className="bb-skeleton-bar-row" />
-        ))}
+    <div
+      style={{
+        background: colors.bgCard,
+        borderRadius: "12px",
+        padding: "10px",
+        textAlign: "center",
+      }}
+    >
+      <div
+        style={{
+          fontSize: "10px",
+          color: colors.textMuted,
+          textTransform: "uppercase",
+          fontWeight: 700,
+          letterSpacing: "0.08em",
+        }}
+      >
+        {label}
+      </div>
+
+      <div
+        style={{
+          marginTop: "6px",
+          fontFamily: typography.fontDisplay,
+          fontSize: "22px",
+          fontWeight: 700,
+          color: colors.text,
+        }}
+      >
+        {value}/25
       </div>
     </div>
   );
-}
-
-// ─── Helpers ─────────────────────────────────────────────
-
-/**
- * Returns a color hex based on a 0–100 score.
- * Maps to the Budget Blossom warm palette.
- */
-function scoreColor(score) {
-  if (score >= 80) return "var(--bb-color-success, #4caf82)";
-  if (score >= 60) return "var(--bb-color-caution, #f0a500)";
-  return "var(--bb-color-warning, #e05c5c)";
 }
