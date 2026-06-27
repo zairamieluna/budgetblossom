@@ -1,101 +1,54 @@
 // src/finance/calendar/periodService.js
 
 const MONTHS = [
-  "January",
-  "February",
-  "March",
-  "April",
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
   "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
 ];
 
-/**
- * Returns the current month and year.
- */
-export function getCurrentPeriod(date = new Date()) {
-  return {
-    month: date.getMonth(),
-    year: date.getFullYear(),
-    label: `${MONTHS[date.getMonth()]} ${date.getFullYear()}`,
-  };
-}
-
-/**
- * Returns a formatted label for any month/year.
- */
-export function getPeriodLabel(month, year) {
-  return `${MONTHS[month]} ${year}`;
-}
-
-/**
- * Returns previous month/year.
- */
-export function getPreviousPeriod(month, year) {
-  if (month === 0) {
-    return {
-      month: 11,
-      year: year - 1,
-    };
-  }
-
-  return {
-    month: month - 1,
-    year,
-  };
-}
-
-/**
- * Returns next month/year.
- */
-export function getNextPeriod(month, year) {
-  if (month === 11) {
-    return {
-      month: 0,
-      year: year + 1,
-    };
-  }
-
-  return {
-    month: month + 1,
-    year,
-  };
-}
-
-/**
- * Returns an array of recent periods.
- *
- * Example:
- * June 2026
- * May 2026
- * April 2026
- * ...
- */
-export function getRecentPeriods(count = 12) {
+export function buildPeriods(year = new Date().getFullYear()) {
   const periods = [];
 
-  const current = new Date();
+  for (let month = 0; month < 12; month++) {
+    const lastDay = new Date(year, month + 1, 0).getDate();
 
-  let month = current.getMonth();
-  let year = current.getFullYear();
-
-  for (let i = 0; i < count; i++) {
     periods.push({
-      month,
-      year,
-      label: getPeriodLabel(month, year),
+      k: `${String(year).slice(-2)}${month}a`,
+      lbl: `${MONTHS[month]} 1–15`,
+      s: new Date(year, month, 1),
+      e: new Date(year, month, 15, 23, 59, 59),
+      pd: new Date(year, month, 7),
     });
 
-    const previous = getPreviousPeriod(month, year);
-
-    month = previous.month;
-    year = previous.year;
+    periods.push({
+      k: `${String(year).slice(-2)}${month}b`,
+      lbl: `${MONTHS[month]} 16–${lastDay}`,
+      s: new Date(year, month, 16),
+      e: new Date(year, month, lastDay, 23, 59, 59),
+      pd: new Date(year, month, 22),
+    });
   }
 
   return periods;
+}
+
+export const PERIODS = buildPeriods();
+
+export function getCurrentPeriodIndex(periods = PERIODS) {
+  const today = new Date();
+
+  const index = periods.findIndex(
+    (period) => today >= period.s && today <= period.e
+  );
+
+  return index >= 0 ? index : 0;
 }
