@@ -4,10 +4,10 @@
  * Budget Blossom
  * Smart Import Review
  *
- * Version 2
- * - Editable fields
- * - User can correct OCR mistakes
- * - Returns edited values on import
+ * Purpose:
+ * - Review OCR results
+ * - Allow editing
+ * - Return corrected document
  */
 
 import { useEffect, useState } from "react";
@@ -37,9 +37,13 @@ export default function ReviewImportModal({
   }
 
   function handleSave() {
+    if (!document) return;
+
     onImport?.({
       ...document,
-      fields,
+      fields: {
+        ...fields,
+      },
     });
   }
 
@@ -91,7 +95,7 @@ export default function ReviewImportModal({
             marginBottom: 24,
           }}
         >
-          Review and edit the detected information before saving.
+          Review and edit the detected information before importing.
         </p>
 
         <div
@@ -105,7 +109,7 @@ export default function ReviewImportModal({
           <strong>Document Type</strong>
 
           <div style={{ marginTop: 8 }}>
-            {document.documentType}
+            {formatLabel(document.documentType)}
           </div>
         </div>
 
@@ -147,7 +151,7 @@ export default function ReviewImportModal({
         {document.validation?.warnings?.length > 0 && (
           <div
             style={{
-              marginTop: 12,
+              marginTop: 20,
               padding: 16,
               background: "#FFF7E8",
               borderRadius: 16,
@@ -155,11 +159,9 @@ export default function ReviewImportModal({
           >
             <strong>Warnings</strong>
 
-            <ul>
+            <ul style={{ marginBottom: 0 }}>
               {document.validation.warnings.map((warning) => (
-                <li key={warning}>
-                  {warning}
-                </li>
+                <li key={warning}>{warning}</li>
               ))}
             </ul>
           </div>
@@ -168,7 +170,7 @@ export default function ReviewImportModal({
         {document.validation?.errors?.length > 0 && (
           <div
             style={{
-              marginTop: 16,
+              marginTop: 20,
               padding: 16,
               background: "#FFECEC",
               borderRadius: 16,
@@ -176,11 +178,9 @@ export default function ReviewImportModal({
           >
             <strong>Errors</strong>
 
-            <ul>
+            <ul style={{ marginBottom: 0 }}>
               {document.validation.errors.map((error) => (
-                <li key={error}>
-                  {error}
-                </li>
+                <li key={error}>{error}</li>
               ))}
             </ul>
           </div>
@@ -208,18 +208,22 @@ export default function ReviewImportModal({
 
           <button
             onClick={handleSave}
+            disabled={!document.validation?.valid}
             style={{
               flex: 1,
               padding: 14,
               border: "none",
               borderRadius: 14,
-              cursor: "pointer",
+              cursor: document.validation?.valid
+                ? "pointer"
+                : "not-allowed",
               background: colors.pink,
               color: "#fff",
               fontWeight: 700,
+              opacity: document.validation?.valid ? 1 : 0.5,
             }}
           >
-            Save
+            Import
           </button>
         </div>
       </div>
@@ -227,8 +231,9 @@ export default function ReviewImportModal({
   );
 }
 
-function formatLabel(text) {
+function formatLabel(text = "") {
   return text
     .replace(/([A-Z])/g, " $1")
+    .replace(/-/g, " ")
     .replace(/^./, (char) => char.toUpperCase());
 }
