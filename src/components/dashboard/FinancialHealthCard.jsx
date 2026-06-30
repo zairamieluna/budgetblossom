@@ -20,7 +20,27 @@ export default function FinancialHealthCard({ health }) {
   if (!health) return null;
 
   const color =
-    RATING_COLORS[health.rating] || colors.pinkDeep;
+    RATING_COLORS[health.rating] ||
+    colors.pinkDeep;
+
+  const metrics = [
+    {
+      label: "Bills",
+      value: health.breakdown?.bills ?? 0,
+    },
+    {
+      label: "Cash Flow",
+      value: health.breakdown?.cashFlow ?? 0,
+    },
+    {
+      label: "Goals",
+      value: health.breakdown?.goals ?? 0,
+    },
+    {
+      label: "Debt",
+      value: health.breakdown?.debt ?? 0,
+    },
+  ];
 
   return (
     <SoftCard
@@ -88,7 +108,7 @@ export default function FinancialHealthCard({ health }) {
             fontSize: "26px",
             fontWeight: 700,
             color,
-            background: "#fff",
+            background: colors.bgCard,
           }}
         >
           {health.score}
@@ -102,25 +122,13 @@ export default function FinancialHealthCard({ health }) {
           gap: "12px",
         }}
       >
-        <Metric
-          label="Bills"
-          value={health.breakdown.bills}
-        />
-
-        <Metric
-          label="Cash Flow"
-          value={health.breakdown.cashFlow}
-        />
-
-        <Metric
-          label="Goals"
-          value={health.breakdown.goals}
-        />
-
-        <Metric
-          label="Debt"
-          value={health.breakdown.debt}
-        />
+        {metrics.map((metric) => (
+          <Metric
+            key={metric.label}
+            label={metric.label}
+            value={metric.value}
+          />
+        ))}
       </div>
     </SoftCard>
   );
