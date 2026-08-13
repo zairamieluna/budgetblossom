@@ -1,9 +1,15 @@
 /**
  * App.jsx
  * Root app component with bottom navigation.
+ *
+ * Budget Blossom
+ *
+ * Navigation behavior:
+ *   • Switches between app pages
+ *   • Automatically scrolls to the top when changing sections
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import "./styles/globals.css";
 
@@ -36,6 +42,23 @@ export default function App() {
 
   const CurrentPage =
     PAGES[activePage] ?? Dashboard;
+
+  // ─────────────────────────────────────────────
+  // Scroll to the top whenever the user changes
+  // sections through the bottom navigation.
+  // ─────────────────────────────────────────────
+  useEffect(() => {
+    window.scrollTo({
+      top: 0,
+      left: 0,
+      behavior: "instant",
+    });
+
+    // Extra reset for browsers that keep the document
+    // scroll position during React page changes.
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }, [activePage]);
 
   return (
     <ThemeProvider>
