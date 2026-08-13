@@ -1,12 +1,15 @@
 /**
  * App.jsx
- * Root app component with bottom navigation.
- *
  * Budget Blossom
  *
- * Navigation behavior:
- *   • Switches between app pages
- *   • Automatically scrolls to the top when changing sections
+ * Root app component with bottom navigation.
+ *
+ * Navigation:
+ *   Home  → Dashboard
+ *   Money → Expenses
+ *   Goals → Savings
+ *   Scan  → Scanner / Expenses
+ *   More  → Settings
  */
 
 import { useEffect, useState } from "react";
@@ -19,45 +22,70 @@ import BottomNav from "./components/common/BottomNav";
 
 import Dashboard from "./pages/Dashboard";
 import Expenses from "./pages/Expenses";
-import Income from "./pages/Income";
-import Cards from "./pages/Cards";
 import Savings from "./pages/Savings";
-import Forecast from "./pages/Forecast";
-import Calendar from "./pages/Calendar";
 import Settings from "./pages/Settings";
 
 const PAGES = {
   dashboard: Dashboard,
-  expenses: Expenses,
-  income: Income,
-  cards: Cards,
-  savings: Savings,
-  forecast: Forecast,
-  calendar: Calendar,
-  settings: Settings,
+
+  // Bottom navigation → actual page
+  money: Expenses,
+  goals: Savings,
+
+  // Scan currently uses the Expenses area until
+  // the dedicated Scanner page is connected.
+  scan: Expenses,
+
+  // More currently opens Settings.
+  more: Settings,
 };
 
 export default function App() {
   const [activePage, setActivePage] = useState("dashboard");
 
-  const CurrentPage =
-    PAGES[activePage] ?? Dashboard;
+  const CurrentPage = PAGES[activePage] ?? Dashboard;
 
-  // ─────────────────────────────────────────────
-  // Scroll to the top whenever the user changes
-  // sections through the bottom navigation.
-  // ─────────────────────────────────────────────
+  function handleNavigate(page) {
+    setActivePage(page);
+  }
+
+  /*
+   * Reset scrolling every time the user changes
+   * sections.
+   *
+   * We reset both the browser window and the
+   * document/body because different browsers
+   * handle mobile-style layouts differently.
+   */
   useEffect(() => {
-    window.scrollTo({
-      top: 0,
-      left: 0,
-      behavior: "instant",
-    });
+    const resetScroll = () => {
+      window.scrollTo(0, 0);
 
-    // Extra reset for browsers that keep the document
-    // scroll position during React page changes.
-    document.documentElement.scrollTop = 0;
-    document.body.scrollTop = 0;
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+
+      /*
+       * Reset common app containers if the app's
+       * CSS makes one of them scrollable.
+       */
+      const scrollContainers = document.querySelectorAll(
+        "main, .bb-dashboard, .bb-page, .bb-content, .bb-app-content"
+      );
+
+      scrollContainers.forEach((element) => {
+        if (element) {
+          element.scrollTop = 0;
+        }
+      });
+    };
+
+    // Run after React renders the new page.
+    requestAnimationFrame(resetScroll);
+
+    // Run once more after layout/paint.
+    const timer = setTimeout(resetScroll, 50);
+
+    return () => clearTimeout(timer);
   }, [activePage]);
 
   return (
@@ -66,7 +94,7 @@ export default function App() {
 
       <BottomNav
         activePage={activePage}
-        onNavigate={setActivePage}
+        onNavigate={handleNavigate}
       />
     </ThemeProvider>
   );
