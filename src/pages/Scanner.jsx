@@ -22,17 +22,10 @@ import { useState } from "react";
 import SoftCard from "../components/common/SoftCard";
 import { colors, typography } from "../ui/designTokens";
 
-import SmartScanController from "../components/scanner/SmartScanController";
+import SmartScanController from "../components/common/scanner/SmartScanController";
 
 export default function Scanner() {
   const [scannerOpen, setScannerOpen] = useState(false);
-
-  /*
-   * These callbacks are intentionally kept here for now.
-   *
-   * The actual persistence connection will be added once
-   * we connect Smart Scan to your Supabase expense/income data.
-   */
 
   function handleImportExpense(expense) {
     console.log("Smart Scan Expense:", expense);
@@ -56,8 +49,8 @@ export default function Scanner() {
     console.log("Smart Scan Income:", income);
 
     alert(
-      `Income detected: ${income.src}\n` +
-      `Amount: $${Number(income.amt || 0).toFixed(2)}`
+      `Income detected: ${income.source}\n` +
+      `Amount: $${Number(income.amount || 0).toFixed(2)}`
     );
   }
 
@@ -76,7 +69,6 @@ export default function Scanner() {
           margin: "0 auto",
         }}
       >
-        {/* Header */}
         <h1
           style={{
             fontFamily: typography.fontDisplay,
@@ -96,7 +88,6 @@ export default function Scanner() {
           statements, PDFs and credit cards.
         </p>
 
-        {/* Scanner Card */}
         <SoftCard
           style={{
             textAlign: "center",
@@ -128,10 +119,10 @@ export default function Scanner() {
               lineHeight: 1.5,
             }}
           >
-            Upload a receipt, screenshot,
-            pay stub, credit card statement
-            or PDF and Budget Blossom will
-            detect the information for you.
+            Upload a receipt, screenshot, pay stub,
+            credit card statement or PDF and
+            Budget Blossom will detect the
+            information for you.
           </p>
 
           <button
@@ -151,7 +142,6 @@ export default function Scanner() {
           </button>
         </SoftCard>
 
-        {/* What can be scanned */}
         <SoftCard
           style={{
             marginTop: 20,
@@ -183,7 +173,7 @@ export default function Scanner() {
             <ScanType
               emoji="💰"
               title="Pay Stubs"
-              description="Import net income into your Budget Pool."
+              description="Import income into your Budget Pool."
             />
 
             <ScanType
@@ -201,7 +191,6 @@ export default function Scanner() {
         </SoftCard>
       </div>
 
-      {/* Actual Smart Scan Controller */}
       <SmartScanController
         open={scannerOpen}
         onClose={() => setScannerOpen(false)}
@@ -212,10 +201,6 @@ export default function Scanner() {
     </div>
   );
 }
-
-/* ─────────────────────────────────────────────
-   Scan Type
-───────────────────────────────────────────── */
 
 function ScanType({
   emoji,
