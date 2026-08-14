@@ -1,7 +1,6 @@
 /**
  * BottomNav.jsx
- * Budget Blossom v1
- * Mobile-first bottom navigation.
+ * Budget Blossom
  */
 
 import { typography, transitions } from "../../ui/designTokens";
@@ -11,7 +10,7 @@ const NAV_ITEMS = [
   { id: "money", label: "Money", emoji: "💳" },
   { id: "goals", label: "Goals", emoji: "🎯" },
   { id: "scan", label: "Scan", emoji: "📷" },
-  { id: "more", label: "More", emoji: "☰" },
+  { id: "settings", label: "More", emoji: "☰" },
 ];
 
 export default function BottomNav({ activePage, onNavigate }) {
@@ -36,7 +35,10 @@ export default function BottomNav({ activePage, onNavigate }) {
       }}
     >
       {NAV_ITEMS.map((item) => {
-        const isActive = activePage === item.id;
+        const isActive =
+          item.id === "scan"
+            ? false
+            : activePage === item.id;
 
         return (
           <button
