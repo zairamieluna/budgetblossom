@@ -12,7 +12,7 @@ export default class ImportService {
    * into an Expense.
    */
   static receiptToExpense(document) {
-    const fields = document.fields ?? {};
+    const fields = document?.fields ?? {};
 
     return {
       id: crypto.randomUUID(),
@@ -26,11 +26,13 @@ export default class ImportService {
       amount:
         Number(fields.total) || 0,
 
-      due: fields.date || "",
+      due:
+        fields.date || "",
 
       paid: true,
 
-      notes: "Imported using Smart Scan",
+      notes:
+        "Imported using Smart Scan",
 
       createdAt:
         new Date().toISOString(),
@@ -42,7 +44,7 @@ export default class ImportService {
    * into updated card values.
    */
   static receiptToCard(document) {
-    const fields = document.fields ?? {};
+    const fields = document?.fields ?? {};
 
     return {
       balance:
@@ -64,37 +66,57 @@ export default class ImportService {
 
   /**
    * Converts a scanned income/paystub
-   * into a Budget Blossom Income object.
+   * into the SAME pooled-income structure
+   * used by Income.jsx.
+   *
+   * Income.jsx stores pool entries as:
+   *
+   * {
+   *   src,
+   *   amt,
+   *   gross,
+   *   date,
+   *   person
+   * }
    */
   static incomeToIncome(document) {
-    const fields = document.fields ?? {};
+    const fields = document?.fields ?? {};
+
+    const netPay =
+      Number(fields.netPay) ||
+      Number(fields.amount) ||
+      Number(fields.total) ||
+      0;
+
+    const grossPay =
+      Number(fields.grossPay) ||
+      netPay;
+
+    const source =
+      fields.employer ||
+      fields.source ||
+      "Imported Income";
+
+    const person =
+      fields.employee ||
+      fields.person ||
+      "Zai";
+
+    const date =
+      fields.payDate ||
+      fields.date ||
+      new Date().toISOString().split("T")[0];
 
     return {
-      id: crypto.randomUUID(),
+      src: `${person} — ${source} (Smart Scan)`,
 
-      source:
-        fields.employer ||
-        fields.source ||
-        "Imported Income",
+      amt: netPay,
 
-      amount:
-        Number(
-          fields.amount ??
-          fields.netPay ??
-          fields.total
-        ) || 0,
+      gross: grossPay,
 
-      date:
-        fields.date ||
-        fields.payDate ||
-        new Date().toISOString().split("T")[0],
+      date,
 
-      type: "Income",
-
-      notes: "Imported using Smart Scan",
-
-      createdAt:
-        new Date().toISOString(),
+      person,
     };
   }
 }
