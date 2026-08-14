@@ -23,16 +23,6 @@ import Calendar from "./pages/Calendar";
 import Settings from "./pages/Settings";
 import Scanner from "./pages/Scanner";
 
-/*
- * Main navigation pages.
- *
- * The bottom navigation uses:
- * Home  → Dashboard
- * Money → Expenses
- * Goals → Savings
- * Scan  → Scanner
- * More  → Settings
- */
 const PAGES = {
   dashboard: Dashboard,
 
@@ -42,40 +32,51 @@ const PAGES = {
   // Goals section
   goals: Savings,
 
-  // Scanner
-  scan: Scanner,
-
   // More section
   more: Settings,
 
-  // Keep these available for existing navigation
+  // Existing pages
   expenses: Expenses,
   income: Income,
   cards: Cards,
   savings: Savings,
   forecast: Forecast,
   calendar: Calendar,
-  settings: Settings,
+
+  // Smart Scanner
+  scan: Scanner,
 };
 
 export default function App() {
   const [activePage, setActivePage] = useState("dashboard");
 
-  const CurrentPage = PAGES[activePage] ?? Dashboard;
-
   function handleNavigate(page) {
-    console.log("Navigating to:", page);
     setActivePage(page);
   }
 
+  function handleScan() {
+    setActivePage("scan");
+  }
+
+  const CurrentPage = PAGES[activePage] || Dashboard;
+
   return (
     <ThemeProvider>
-      <CurrentPage />
+      <div
+        style={{
+          minHeight: "100vh",
+          width: "100%",
+          position: "relative",
+        }}
+      >
+        <CurrentPage />
 
-      <BottomNav
-        activePage={activePage}
-        onNavigate={handleNavigate}
-      />
+        <BottomNav
+          activePage={activePage}
+          onNavigate={handleNavigate}
+          onScan={handleScan}
+        />
+      </div>
     </ThemeProvider>
   );
 }
