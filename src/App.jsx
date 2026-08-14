@@ -1,8 +1,6 @@
 /**
  * App.jsx
  * Budget Blossom
- *
- * Root application with bottom navigation.
  */
 
 import { useState } from "react";
@@ -21,62 +19,60 @@ import Savings from "./pages/Savings";
 import Forecast from "./pages/Forecast";
 import Calendar from "./pages/Calendar";
 import Settings from "./pages/Settings";
-import Scanner from "./pages/Scanner";
+
+import SmartScanController from "./components/common/scanner/SmartScanController";
 
 const PAGES = {
   dashboard: Dashboard,
 
-  // Money section
+  // Money
   money: Expenses,
 
-  // Goals section
+  // Goals
   goals: Savings,
 
-  // More section
+  // More
   more: Settings,
 
-  // Existing pages
+  // Other pages remain available
   expenses: Expenses,
   income: Income,
   cards: Cards,
   savings: Savings,
   forecast: Forecast,
   calendar: Calendar,
-
-  // Smart Scanner
-  scan: Scanner,
+  settings: Settings,
 };
 
 export default function App() {
   const [activePage, setActivePage] = useState("dashboard");
+  const [scannerOpen, setScannerOpen] = useState(false);
 
-  function handleNavigate(page) {
-    setActivePage(page);
-  }
+  const CurrentPage = PAGES[activePage] ?? Dashboard;
 
   function handleScan() {
-    setActivePage("scan");
+    setScannerOpen(true);
   }
 
-  const CurrentPage = PAGES[activePage] || Dashboard;
+  function handleCloseScanner() {
+    setScannerOpen(false);
+  }
 
   return (
     <ThemeProvider>
-      <div
-        style={{
-          minHeight: "100vh",
-          width: "100%",
-          position: "relative",
-        }}
-      >
-        <CurrentPage />
+      <CurrentPage />
 
-        <BottomNav
-          activePage={activePage}
-          onNavigate={handleNavigate}
-          onScan={handleScan}
-        />
-      </div>
+      <BottomNav
+        activePage={activePage}
+        onNavigate={setActivePage}
+        onScan={handleScan}
+      />
+
+      {/* Smart Scanner lives at the App level */}
+      <SmartScanController
+        open={scannerOpen}
+        onClose={handleCloseScanner}
+      />
     </ThemeProvider>
   );
 }
