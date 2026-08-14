@@ -6,7 +6,7 @@
  */
 
 import GoogleVisionProvider from "./providers/GoogleVisionProvider";
-import { OCRService } from "./OCRService";
+import OCRService from "./OCRService";
 
 import { classifyDocument } from "./DocumentClassifier";
 import { extractFields } from "./FieldExtractor";
@@ -17,24 +17,25 @@ const provider = new GoogleVisionProvider();
 const service = new OCRService(provider);
 
 export async function processDocument(file) {
-  // Step 1
+  // Step 1: Scan document
   const result = await service.scanDocument(file);
 
-  // Step 2
+  // Step 2: Classify document
   const documentType = classifyDocument(result.text);
 
-  // Step 3
+  // Step 3: Extract fields
   const fields = extractFields(
     documentType,
     result.text
   );
 
-  // Step 4
+  // Step 4: Validate extracted data
   const validation = validateExtractedData(
     documentType,
     fields
   );
 
+  // Step 5: Return complete document
   return {
     provider: result.provider,
 
