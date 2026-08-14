@@ -1,10 +1,14 @@
 /**
  * Scanner.jsx
  *
- * Budget Blossom Smart Scanner
+ * Budget Blossom
  *
- * Connects the Scanner page to the complete
- * SmartScanController workflow.
+ * Smart Scanner page.
+ *
+ * Supports:
+ *   • Receipt → Expense
+ *   • Credit Card → Card
+ *   • Income / Pay Stub → Income
  */
 
 import { useState } from "react";
@@ -12,10 +16,18 @@ import { useState } from "react";
 import SoftCard from "../components/common/SoftCard";
 import { colors, typography } from "../ui/designTokens";
 
-import SmartScanController from "../components/scanner/SmartScanController";
+import SmartScanController from "../components/common/scanner/SmartScanController";
 
 export default function Scanner() {
-  const [scannerOpen, setScannerOpen] = useState(true);
+  const [scannerOpen, setScannerOpen] = useState(false);
+
+  function openScanner() {
+    setScannerOpen(true);
+  }
+
+  function closeScanner() {
+    setScannerOpen(false);
+  }
 
   return (
     <div
@@ -33,7 +45,7 @@ export default function Scanner() {
           margin: "0 auto",
         }}
       >
-        {/* Header */}
+        {/* HEADER */}
         <h1
           style={{
             fontFamily: typography.fontDisplay,
@@ -45,25 +57,26 @@ export default function Scanner() {
 
         <p
           style={{
-            opacity: 0.75,
+            opacity: 0.7,
+            marginTop: 0,
             marginBottom: 24,
           }}
         >
-          Import receipts, screenshots, statements, income,
-          pay stubs, PDFs and credit cards.
+          Scan your financial documents and automatically
+          import the information into Budget Blossom.
         </p>
 
-        {/* Main scanner card */}
+        {/* MAIN SCANNER CARD */}
         <SoftCard
           style={{
+            padding: 32,
             textAlign: "center",
-            padding: 40,
           }}
         >
           <div
             style={{
-              fontSize: 54,
-              marginBottom: 18,
+              fontSize: 56,
+              marginBottom: 16,
             }}
           >
             📄
@@ -71,6 +84,7 @@ export default function Scanner() {
 
           <h2
             style={{
+              marginTop: 0,
               marginBottom: 8,
             }}
           >
@@ -80,91 +94,175 @@ export default function Scanner() {
           <p
             style={{
               opacity: 0.7,
-              marginBottom: 24,
               lineHeight: 1.5,
+              marginBottom: 24,
             }}
           >
-            Upload a document and Budget Blossom will
-            detect the information automatically.
+            Upload a receipt, credit card statement,
+            pay stub, income document, screenshot or PDF.
           </p>
 
           <button
             type="button"
-            onClick={() => setScannerOpen(true)}
+            onClick={openScanner}
             style={{
               width: "100%",
               padding: "14px 20px",
-              borderRadius: 14,
               border: "none",
-              cursor: "pointer",
+              borderRadius: 14,
               background: colors.primary,
               color: "#fff",
-              fontWeight: 700,
               fontSize: 15,
+              fontWeight: 700,
+              cursor: "pointer",
               position: "relative",
               zIndex: 2,
             }}
           >
-            📷 Choose Document
+            📷 Scan a Document
           </button>
 
-          <p
+          <div
             style={{
               marginTop: 14,
-              marginBottom: 0,
               fontSize: 12,
               opacity: 0.6,
             }}
           >
             JPG, PNG or PDF
-          </p>
+          </div>
         </SoftCard>
 
-        {/* Instructions */}
+        {/* WHAT CAN BE SCANNED */}
         <SoftCard
           style={{
             marginTop: 16,
-            padding: 18,
+            padding: 20,
           }}
         >
-          <div
+          <h3
             style={{
-              fontWeight: 700,
-              marginBottom: 10,
+              marginTop: 0,
+              marginBottom: 14,
             }}
           >
             What can I scan?
-          </div>
+          </h3>
 
           <div
             style={{
               display: "grid",
-              gap: 8,
-              fontSize: 13,
-              opacity: 0.75,
+              gap: 12,
             }}
           >
-            <div>🧾 Receipts → Expenses</div>
-            <div>💰 Pay stubs → Income</div>
-            <div>💳 Credit card statements → Cards</div>
-            <div>🏦 Bank statements → Accounts</div>
-            <div>📄 PDFs and screenshots</div>
+            <div>
+              🧾 <strong>Receipt</strong>
+              <div
+                style={{
+                  marginLeft: 26,
+                  fontSize: 13,
+                  opacity: 0.65,
+                }}
+              >
+                Automatically create an expense
+              </div>
+            </div>
+
+            <div>
+              💳 <strong>Credit Card</strong>
+              <div
+                style={{
+                  marginLeft: 26,
+                  fontSize: 13,
+                  opacity: 0.65,
+                }}
+              >
+                Detect and import card information
+              </div>
+            </div>
+
+            <div>
+              💰 <strong>Income / Pay Stub</strong>
+              <div
+                style={{
+                  marginLeft: 26,
+                  fontSize: 13,
+                  opacity: 0.65,
+                }}
+              >
+                Automatically create an income entry
+              </div>
+            </div>
+
+            <div>
+              🏦 <strong>Bank Statement</strong>
+              <div
+                style={{
+                  marginLeft: 26,
+                  fontSize: 13,
+                  opacity: 0.65,
+                }}
+              >
+                Detect financial information
+              </div>
+            </div>
+
+            <div>
+              📄 <strong>PDF / Screenshot</strong>
+              <div
+                style={{
+                  marginLeft: 26,
+                  fontSize: 13,
+                  opacity: 0.65,
+                }}
+              >
+                Process supported financial documents
+              </div>
+            </div>
           </div>
         </SoftCard>
       </div>
 
-      {/* COMPLETE SMART SCAN CONTROLLER */}
+      {/* SMART SCAN CONTROLLER */}
       <SmartScanController
         open={scannerOpen}
-        onClose={() => setScannerOpen(false)}
+        onClose={closeScanner}
         onImportExpense={(expense) => {
-          console.log("Scanner imported expense:", expense);
+          console.log(
+            "Smart Scanner → Expense:",
+            expense
+          );
+
+          /*
+           * Expense import callback.
+           *
+           * Keep this callback for the existing
+           * expense workflow.
+           */
         }}
         onImportCard={(card) => {
-          console.log("Scanner imported card:", card);
+          console.log(
+            "Smart Scanner → Credit Card:",
+            card
+          );
+
+          /*
+           * Credit card import callback.
+           */
         }}
         onImportIncome={(income) => {
-          console.log("Scanner imported income:", income);
+          console.log(
+            "Smart Scanner → Income:",
+            income
+          );
+
+          /*
+           * IMPORTANT:
+           * Income scanning is intentionally preserved.
+           *
+           * This receives the income/pay-stub data
+           * generated by SmartScanController.
+           */
         }}
       />
     </div>
