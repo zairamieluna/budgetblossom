@@ -2,6 +2,7 @@
  * SmartScanController.jsx
  *
  * Budget Blossom
+ * Smart Scan Controller
  *
  * Controls the complete Smart Scan workflow.
  *
@@ -41,13 +42,23 @@ export default function SmartScanController({
       console.log("Smart Scan result:", result);
 
       setDocument(result);
+
+      /*
+       * Close the scanner BEFORE opening
+       * the review modal.
+       *
+       * This prevents the scanner overlay
+       * from blocking the review screen.
+       */
+      onClose?.();
+
       setReviewOpen(true);
     } catch (error) {
       console.error("Smart Scan error:", error);
 
       alert(
         error?.message ||
-        "Unable to scan this document."
+          "Unable to scan this document."
       );
     } finally {
       setLoading(false);
@@ -62,90 +73,95 @@ export default function SmartScanController({
       reviewedDocument
     );
 
-    /*
-     * RECEIPT → EXPENSE
-     */
-    if (
-      reviewedDocument.documentType ===
-      "receipt"
-    ) {
-      const expense =
-        ImportService.receiptToExpense(
-          reviewedDocument
+    try {
+      /*
+       * RECEIPT → EXPENSE
+       */
+      if (
+        reviewedDocument.documentType ===
+        "receipt"
+      ) {
+        const expense =
+          ImportService.receiptToExpense(
+            reviewedDocument
+          );
+
+        console.log(
+          "Imported expense:",
+          expense
         );
 
-      console.log(
-        "Imported expense:",
-        expense
-      );
+        onImportExpense?.(expense);
+      }
 
-      onImportExpense?.(expense);
-    }
+      /*
+       * CREDIT CARD → CARD
+       */
+      else if (
+        reviewedDocument.documentType ===
+        "credit-card"
+      ) {
+        const card =
+          ImportService.receiptToCard(
+            reviewedDocument
+          );
 
-    /*
-     * CREDIT CARD → CARD
-     */
-    else if (
-      reviewedDocument.documentType ===
-      "credit-card"
-    ) {
-      const card =
-        ImportService.receiptToCard(
-          reviewedDocument
+        console.log(
+          "Imported card:",
+          card
         );
 
-      console.log(
-        "Imported card:",
-        card
-      );
+        onImportCard?.(card);
+      }
 
-      onImportCard?.(card);
-    }
+      /*
+       * INCOME / PAY STUB → INCOME
+       */
+      else if (
+        reviewedDocument.documentType ===
+        "income"
+      ) {
+        const income =
+          ImportService.incomeToIncome(
+            reviewedDocument
+          );
 
-    /*
-     * INCOME / PAY STUB → INCOME
-     */
-    else if (
-      reviewedDocument.documentType ===
-      "income"
-    ) {
-      const income =
-        ImportService.incomeToIncome(
-          reviewedDocument
+        console.log(
+          "Imported income:",
+          income
         );
 
-      console.log(
-        "Imported income:",
-        income
-      );
+        onImportIncome?.(income);
+      }
 
-      onImportIncome?.(income);
-    }
+      /*
+       * UNKNOWN DOCUMENT
+       */
+      else {
+        alert(
+          `This document was detected as "${reviewedDocument.documentType}". ` +
+            "It cannot be imported yet."
+        );
 
-    /*
-     * UNKNOWN DOCUMENT
-     */
-    else {
-      console.warn(
-        "Unsupported document type:",
-        reviewedDocument.documentType
+        return;
+      }
+
+      /*
+       * Successfully imported.
+       */
+      setReviewOpen(false);
+      setDocument(null);
+    } catch (error) {
+      console.error(
+        "Smart Scan import error:",
+        error
       );
 
       alert(
-        `This document was detected as "${reviewedDocument.documentType}". ` +
-        "It cannot be imported yet."
+        error?.message ||
+          "Unable to import this document."
       );
-
-      return;
     }
-
-    /*
-     * Close review modal after successful import.
-     */
-    setReviewOpen(false);
-    setDocument(null);
-
-    onClose?.();
   }
 
   function handleCancelReview() {
@@ -155,12 +171,23 @@ export default function SmartScanController({
 
   return (
     <>
+      {/* 
+       * Scanner
+       *
+       * Only appears when `open` is true.
+       */}
       <ScannerModal
-        open={open}
+        open={Boolean(open) && !reviewOpen}
         onClose={onClose}
         onFileSelected={handleFileSelected}
       />
 
+      {/* 
+       * Review
+       *
+       * Scanner is explicitly closed while
+       * this modal is open.
+       */}
       <ReviewImportModal
         open={reviewOpen}
         document={document}
@@ -168,20 +195,21 @@ export default function SmartScanController({
         onImport={handleImport}
       />
 
+      {/* 
+       * Loading screen
+       */}
       {loading && (
         <div
           style={{
             position: "fixed",
             inset: 0,
-            background:
-              "rgba(0,0,0,.45)",
-            backdropFilter:
-              "blur(3px)",
+            background: "rgba(0,0,0,.45)",
+            backdropFilter: "blur(3px)",
             display: "flex",
             flexDirection: "column",
             justifyContent: "center",
             alignItems: "center",
-            zIndex: 999,
+            zIndex: 2000,
             color: "#fff",
             fontSize: 20,
             fontWeight: 700,
