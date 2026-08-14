@@ -1,92 +1,53 @@
 /**
  * App.jsx
  * Budget Blossom
- *
- * Root app component with bottom navigation.
- *
- * Navigation:
- *   Home  → Dashboard
- *   Money → Expenses
- *   Goals → Savings
- *   Scan  → Scanner / Expenses
- *   More  → Settings
  */
 
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
 
 import "./styles/globals.css";
-
 import { ThemeProvider } from "./context/ThemeContext";
 
 import BottomNav from "./components/common/BottomNav";
 
 import Dashboard from "./pages/Dashboard";
 import Expenses from "./pages/Expenses";
+import Income from "./pages/Income";
 import Savings from "./pages/Savings";
 import Settings from "./pages/Settings";
+import ScannerModal from "./components/common/ScannerModal";
 
 const PAGES = {
   dashboard: Dashboard,
-
-  // Bottom navigation → actual page
   money: Expenses,
+  income: Income,
   goals: Savings,
-
-  // Scan currently uses the Expenses area until
-  // the dedicated Scanner page is connected.
-  scan: Expenses,
-
-  // More currently opens Settings.
-  more: Settings,
+  settings: Settings,
 };
 
 export default function App() {
   const [activePage, setActivePage] = useState("dashboard");
+  const [scannerOpen, setScannerOpen] = useState(false);
 
-  const CurrentPage = PAGES[activePage] ?? Dashboard;
+  // Always start each page at the top
+  useEffect(() => {
+    window.scrollTo({
+      top: 0,
+      left: 0,
+      behavior: "instant",
+    });
+  }, [activePage]);
 
   function handleNavigate(page) {
+    if (page === "scan") {
+      setScannerOpen(true);
+      return;
+    }
+
     setActivePage(page);
   }
 
-  /*
-   * Reset scrolling every time the user changes
-   * sections.
-   *
-   * We reset both the browser window and the
-   * document/body because different browsers
-   * handle mobile-style layouts differently.
-   */
-  useEffect(() => {
-    const resetScroll = () => {
-      window.scrollTo(0, 0);
-
-      document.documentElement.scrollTop = 0;
-      document.body.scrollTop = 0;
-
-      /*
-       * Reset common app containers if the app's
-       * CSS makes one of them scrollable.
-       */
-      const scrollContainers = document.querySelectorAll(
-        "main, .bb-dashboard, .bb-page, .bb-content, .bb-app-content"
-      );
-
-      scrollContainers.forEach((element) => {
-        if (element) {
-          element.scrollTop = 0;
-        }
-      });
-    };
-
-    // Run after React renders the new page.
-    requestAnimationFrame(resetScroll);
-
-    // Run once more after layout/paint.
-    const timer = setTimeout(resetScroll, 50);
-
-    return () => clearTimeout(timer);
-  }, [activePage]);
+  const CurrentPage = PAGES[activePage] ?? Dashboard;
 
   return (
     <ThemeProvider>
@@ -95,6 +56,15 @@ export default function App() {
       <BottomNav
         activePage={activePage}
         onNavigate={handleNavigate}
+      />
+
+      <ScannerModal
+        open={scannerOpen}
+        onClose={() => setScannerOpen(false)}
+        onFileSelected={(file) => {
+          console.log("Selected file:", file);
+          setScannerOpen(false);
+        }}
       />
     </ThemeProvider>
   );
