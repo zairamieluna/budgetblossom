@@ -10,6 +10,7 @@ import "./styles/globals.css";
 import { ThemeProvider } from "./context/ThemeContext";
 
 import BottomNav from "./components/common/BottomNav";
+import ScannerModal from "./components/common/scanner/ScannerModal";
 
 import Dashboard from "./pages/Dashboard";
 import Expenses from "./pages/Expenses";
@@ -23,16 +24,12 @@ import Settings from "./pages/Settings";
 const PAGES = {
   dashboard: Dashboard,
 
-  // Money section
+  // Bottom navigation
   money: Expenses,
-
-  // Goals section
   goals: Savings,
-
-  // More section
   more: Settings,
 
-  // Existing pages — keep these available
+  // Existing pages
   expenses: Expenses,
   income: Income,
   cards: Cards,
@@ -44,7 +41,21 @@ const PAGES = {
 export default function App() {
   const [activePage, setActivePage] = useState("dashboard");
 
+  // Scanner modal state
+  const [scannerOpen, setScannerOpen] = useState(false);
+
   const CurrentPage = PAGES[activePage] ?? Dashboard;
+
+  function handleScan() {
+    setScannerOpen(true);
+  }
+
+  function handleFileSelected(file) {
+    console.log("Selected file:", file);
+
+    // Keep the modal open for now.
+    // We can connect the actual AI/Supabase scanning next.
+  }
 
   return (
     <ThemeProvider>
@@ -53,6 +64,13 @@ export default function App() {
       <BottomNav
         activePage={activePage}
         onNavigate={setActivePage}
+        onScan={handleScan}
+      />
+
+      <ScannerModal
+        open={scannerOpen}
+        onClose={() => setScannerOpen(false)}
+        onFileSelected={handleFileSelected}
       />
     </ThemeProvider>
   );
