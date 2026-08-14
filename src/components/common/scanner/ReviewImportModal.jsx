@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { colors, typography } from "../../ui/designTokens";
+import { colors, typography } from "../../../ui/designTokens";
 
 export default function ReviewImportModal({
   open,
@@ -50,7 +50,6 @@ export default function ReviewImportModal({
   return (
     <>
       {/* Overlay */}
-
       <div
         onClick={onCancel}
         style={{
@@ -63,7 +62,6 @@ export default function ReviewImportModal({
       />
 
       {/* Modal */}
-
       <div
         style={{
           position: "fixed",
@@ -160,8 +158,8 @@ export default function ReviewImportModal({
             <strong>Warnings</strong>
 
             <ul style={{ marginBottom: 0 }}>
-              {document.validation.warnings.map((warning) => (
-                <li key={warning}>{warning}</li>
+              {document.validation.warnings.map((warning, index) => (
+                <li key={index}>{warning}</li>
               ))}
             </ul>
           </div>
@@ -179,8 +177,8 @@ export default function ReviewImportModal({
             <strong>Errors</strong>
 
             <ul style={{ marginBottom: 0 }}>
-              {document.validation.errors.map((error) => (
-                <li key={error}>{error}</li>
+              {document.validation.errors.map((error, index) => (
+                <li key={index}>{error}</li>
               ))}
             </ul>
           </div>
