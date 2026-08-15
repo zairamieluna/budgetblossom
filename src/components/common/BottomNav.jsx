@@ -1,54 +1,22 @@
 /**
  * BottomNav.jsx
  * Budget Blossom
- *
- * Main bottom navigation.
  */
 
 import { typography, transitions } from "../../ui/designTokens";
 
 const NAV_ITEMS = [
-  {
-    id: "dashboard",
-    label: "Home",
-    emoji: "🏠",
-  },
-  {
-    id: "money",
-    label: "Money",
-    emoji: "💳",
-  },
-  {
-    id: "goals",
-    label: "Goals",
-    emoji: "🎯",
-  },
-  {
-    id: "scan",
-    label: "Scan",
-    emoji: "📷",
-  },
-  {
-    id: "more",
-    label: "More",
-    emoji: "☰",
-  },
+  { id: "dashboard", label: "Home", emoji: "🏠" },
+  { id: "money", label: "Money", emoji: "💳" },
+  { id: "goals", label: "Goals", emoji: "🎯" },
+  { id: "scan", label: "Scan", emoji: "📷" },
+  { id: "more", label: "More", emoji: "☰" },
 ];
 
 export default function BottomNav({
   activePage,
   onNavigate,
-  onScan,
 }) {
-  function handleClick(item) {
-    if (item.id === "scan") {
-      onScan?.();
-      return;
-    }
-
-    onNavigate?.(item.id);
-  }
-
   return (
     <nav
       style={{
@@ -67,31 +35,17 @@ export default function BottomNav({
         paddingLeft: "env(safe-area-inset-left)",
         paddingRight: "env(safe-area-inset-right)",
         zIndex: 400,
-        boxSizing: "border-box",
       }}
     >
       {NAV_ITEMS.map((item) => {
-        const isActive =
-          activePage === item.id ||
-          (item.id === "money" &&
-            ["money", "expenses", "income", "cards"].includes(
-              activePage
-            )) ||
-          (item.id === "goals" &&
-            ["goals", "savings", "forecast", "calendar"].includes(
-              activePage
-            )) ||
-          (item.id === "more" &&
-            activePage === "more");
+        const isActive = activePage === item.id;
 
         return (
           <button
             key={item.id}
             type="button"
-            onClick={() => handleClick(item)}
+            onClick={() => onNavigate(item.id)}
             style={{
-              appearance: "none",
-              WebkitAppearance: "none",
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
@@ -100,7 +54,6 @@ export default function BottomNav({
               flex: 1,
               height: "100%",
               padding: "6px 2px 4px",
-              margin: 0,
               border: "none",
               borderRadius: "12px",
               cursor: "pointer",
@@ -117,8 +70,7 @@ export default function BottomNav({
               letterSpacing: "0.04em",
               textTransform: "uppercase",
               transition: `all ${transitions.base}`,
-              position: "relative",
-              zIndex: 401,
+              touchAction: "manipulation",
             }}
           >
             <span
@@ -130,19 +82,12 @@ export default function BottomNav({
                   : "scale(1)",
                 opacity: isActive ? 1 : 0.7,
                 transition: `all ${transitions.base}`,
-                pointerEvents: "none",
               }}
             >
               {item.emoji}
             </span>
 
-            <span
-              style={{
-                pointerEvents: "none",
-              }}
-            >
-              {item.label}
-            </span>
+            <span>{item.label}</span>
           </button>
         );
       })}
