@@ -5,6 +5,7 @@
  * Smart Scanner Page
  */
 
+import { useState } from "react";
 import SmartScanController from "../components/common/scanner/SmartScanController";
 
 export default function Scanner({
@@ -12,6 +13,15 @@ export default function Scanner({
   onImportCard,
   onImportIncome,
 }) {
+  const [scannerOpen, setScannerOpen] = useState(true);
+
+  function handleClose() {
+    setScannerOpen(false);
+
+    // Return to the previous page after closing
+    window.history.back();
+  }
+
   return (
     <div
       style={{
@@ -66,8 +76,8 @@ export default function Scanner({
         </div>
 
         <SmartScanController
-          open={true}
-          onClose={() => {}}
+          open={scannerOpen}
+          onClose={handleClose}
           onImportExpense={onImportExpense}
           onImportCard={onImportCard}
           onImportIncome={onImportIncome}
