@@ -2,14 +2,7 @@
  * SmartScanController.jsx
  *
  * Budget Blossom
- * Smart Scan Controller
- *
- * Controls the complete Smart Scan workflow.
- *
- * Supports:
- *   • Receipt → Expense
- *   • Credit Card → Card
- *   • Income / Pay Stub → Income
+ * Smart Scanner Controller
  */
 
 import { useState } from "react";
@@ -18,6 +11,7 @@ import ScannerModal from "./ScannerModal";
 import ReviewImportModal from "./ReviewImportModal";
 
 import { processDocument } from "../../../services/ocr/OCRPipeline";
+
 import ImportService from "../../../services/scanner/ImportService";
 
 export default function SmartScanController({
@@ -37,24 +31,19 @@ export default function SmartScanController({
     try {
       setLoading(true);
 
+      console.log("Starting OCR:", file.name);
+
       const result = await processDocument(file);
 
-      console.log("Smart Scan result:", result);
+      console.log("OCR RESULT:", result);
 
       setDocument(result);
 
-      /*
-       * Close the scanner BEFORE opening
-       * the review modal.
-       *
-       * This prevents the scanner overlay
-       * from blocking the review screen.
-       */
       onClose?.();
 
       setReviewOpen(true);
     } catch (error) {
-      console.error("Smart Scan error:", error);
+      console.error("SMART SCAN ERROR:", error);
 
       alert(
         error?.message ||
@@ -68,92 +57,52 @@ export default function SmartScanController({
   function handleImport(reviewedDocument) {
     if (!reviewedDocument) return;
 
-    console.log(
-      "Importing document:",
-      reviewedDocument
-    );
-
     try {
-      /*
-       * RECEIPT → EXPENSE
-       */
-      if (
-        reviewedDocument.documentType ===
-        "receipt"
-      ) {
+      if (reviewedDocument.documentType === "receipt") {
         const expense =
           ImportService.receiptToExpense(
             reviewedDocument
           );
 
-        console.log(
-          "Imported expense:",
-          expense
-        );
-
         onImportExpense?.(expense);
       }
 
-      /*
-       * CREDIT CARD → CARD
-       */
       else if (
-        reviewedDocument.documentType ===
-        "credit-card"
+        reviewedDocument.documentType === "credit-card"
       ) {
         const card =
           ImportService.receiptToCard(
             reviewedDocument
           );
 
-        console.log(
-          "Imported card:",
-          card
-        );
-
         onImportCard?.(card);
       }
 
-      /*
-       * INCOME / PAY STUB → INCOME
-       */
       else if (
-        reviewedDocument.documentType ===
-        "income"
+        reviewedDocument.documentType === "income"
       ) {
         const income =
           ImportService.incomeToIncome(
             reviewedDocument
           );
 
-        console.log(
-          "Imported income:",
-          income
-        );
-
         onImportIncome?.(income);
       }
 
-      /*
-       * UNKNOWN DOCUMENT
-       */
       else {
         alert(
-          `This document was detected as "${reviewedDocument.documentType}". ` +
-            "It cannot be imported yet."
+          `This document was detected as "${reviewedDocument.documentType}".`
         );
 
         return;
       }
 
-      /*
-       * Successfully imported.
-       */
       setReviewOpen(false);
       setDocument(null);
+
     } catch (error) {
       console.error(
-        "Smart Scan import error:",
+        "IMPORT ERROR:",
         error
       );
 
@@ -171,23 +120,12 @@ export default function SmartScanController({
 
   return (
     <>
-      {/* 
-       * Scanner
-       *
-       * Only appears when `open` is true.
-       */}
       <ScannerModal
         open={Boolean(open) && !reviewOpen}
         onClose={onClose}
         onFileSelected={handleFileSelected}
       />
 
-      {/* 
-       * Review
-       *
-       * Scanner is explicitly closed while
-       * this modal is open.
-       */}
       <ReviewImportModal
         open={reviewOpen}
         document={document}
@@ -195,34 +133,23 @@ export default function SmartScanController({
         onImport={handleImport}
       />
 
-      {/* 
-       * Loading screen
-       */}
       {loading && (
         <div
           style={{
             position: "fixed",
             inset: 0,
             background: "rgba(0,0,0,.45)",
-            backdropFilter: "blur(3px)",
             display: "flex",
             flexDirection: "column",
             justifyContent: "center",
             alignItems: "center",
-            zIndex: 2000,
+            zIndex: 9999,
             color: "#fff",
             fontSize: 20,
             fontWeight: 700,
-            textAlign: "center",
-            padding: 24,
           }}
         >
-          <div
-            style={{
-              fontSize: 42,
-              marginBottom: 14,
-            }}
-          >
+          <div style={{ fontSize: 42 }}>
             📄
           </div>
 
@@ -234,7 +161,6 @@ export default function SmartScanController({
             style={{
               fontSize: 13,
               fontWeight: 400,
-              opacity: 0.8,
               marginTop: 8,
             }}
           >
