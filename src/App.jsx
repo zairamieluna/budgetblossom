@@ -1,6 +1,8 @@
 /**
  * App.jsx
  * Budget Blossom
+ *
+ * Root application with bottom navigation.
  */
 
 import { useState } from "react";
@@ -19,8 +21,7 @@ import Savings from "./pages/Savings";
 import Forecast from "./pages/Forecast";
 import Calendar from "./pages/Calendar";
 import Settings from "./pages/Settings";
-
-import SmartScanController from "./components/common/scanner/SmartScanController";
+import Scanner from "./pages/Scanner";
 
 const PAGES = {
   dashboard: Dashboard,
@@ -31,10 +32,13 @@ const PAGES = {
   // Goals
   goals: Savings,
 
+  // Scanner
+  scan: Scanner,
+
   // More
   more: Settings,
 
-  // Other pages remain available
+  // Existing pages — kept available
   expenses: Expenses,
   income: Income,
   cards: Cards,
@@ -46,17 +50,8 @@ const PAGES = {
 
 export default function App() {
   const [activePage, setActivePage] = useState("dashboard");
-  const [scannerOpen, setScannerOpen] = useState(false);
 
   const CurrentPage = PAGES[activePage] ?? Dashboard;
-
-  function handleScan() {
-    setScannerOpen(true);
-  }
-
-  function handleCloseScanner() {
-    setScannerOpen(false);
-  }
 
   return (
     <ThemeProvider>
@@ -65,13 +60,6 @@ export default function App() {
       <BottomNav
         activePage={activePage}
         onNavigate={setActivePage}
-        onScan={handleScan}
-      />
-
-      {/* Smart Scanner lives at the App level */}
-      <SmartScanController
-        open={scannerOpen}
-        onClose={handleCloseScanner}
       />
     </ThemeProvider>
   );
