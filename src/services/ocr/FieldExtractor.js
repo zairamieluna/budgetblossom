@@ -13,40 +13,41 @@
  *   • Statement
  *   • Bank account
  *
- * IMPORTANT:
- * OCR text is not always returned in the same visual order
- * as the document. Therefore, extraction is done using
- * line-aware patterns and contextual fallbacks.
+ * Designed for OCR/PDF text where:
+ *   - labels and values may be on the same line
+ *   - labels and values may be on different lines
+ *   - banks use different terminology
+ *   - dates may use different formats
  */
 
-// ---------------------------------------------------------
-// BASIC HELPERS
-// ---------------------------------------------------------
 
-function cleanText(text = "") {
+/* =========================================================
+   BASIC HELPERS
+   ========================================================= */
+
+function normalizeText(text = "") {
   return String(text)
-    .replace(/\r/g, "")
     .replace(/\u00A0/g, " ")
     .replace(/[ \t]+/g, " ")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
     .trim();
 }
 
-function getLines(text = "") {
-  return cleanText(text)
-    .split("\n")
-    .map(line => line.trim())
-    .filter(Boolean);
-}
 
-function parseMoney(value) {
+/**
+ * Convert:
+ *   "$1,441.49" -> 1441.49
+ *   "1,441.49"  -> 1441.49
+ *   "$0"        -> 0
+ */
+function moneyToNumber(value) {
   if (value === null || value === undefined) {
     return null;
   }
 
   const cleaned = String(value)
-    .replace(/[$£€]/g, "")
-    .replace(/,/g, "")
-    .replace(/\s/g, "")
+    .replace(/[$€£¥,\s]/g, "")
     .replace(/[^\d.-]/g, "");
 
   if (!cleaned) {
@@ -58,89 +59,128 @@ function parseMoney(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+
 /**
- * Find a money amount on the SAME line as one of the labels.
+ * Extract the first monetary amount from a string.
  *
- * This is much safer than allowing \\s to cross multiple
- * OCR lines.
+ * Handles:
+ *   $1,441.49
+ *   1,441.49
+ *   $0
+ *   31.71
  */
-function extractMoneyFromSameLine(text, labels) {
-  const lines = getLines(text);
-
-  for (const line of lines) {
-    const lowerLine = line.toLowerCase();
-
-    for (const label of labels) {
-      if (!lowerLine.includes(label.toLowerCase())) {
-        continue;
-      }
-
-      // Find every money-like number on the line.
-      const matches = line.match(
-        /(?:\$|CAD\s*)?\(?-?\d{1,3}(?:,\d{3})*(?:\.\d{2})?\)?/gi
-      );
-
-      if (!matches) {
-        continue;
-      }
-
-      // Use the LAST money value on the line.
-      // Banking statements often have:
-      // "Total balance ........ $2,032.49"
-      const values = matches
-        .map(parseMoney)
-        .filter(value => value !== null);
-
-      if (values.length > 0) {
-        return values[values.length - 1];
-      }
-    }
+function extractMoneyFromString(value) {
+  if (!value) {
+    return null;
   }
 
-  return null;
+  const match = String(value).match(
+    /(?:\$|CAD\s*)?-?\d{1,3}(?:,\d{3})*(?:\.\d{2})?|(?:\$|CAD\s*)?-?\d+(?:\.\d{2})?/i
+  );
+
+  if (!match) {
+    return null;
+  }
+
+  return moneyToNumber(match[0]);
 }
 
+
+/* =========================================================
+   MONEY EXTRACTION
+   ========================================================= */
+
 /**
- * Search a small context window around a label.
+ * Find a money value associated with a label.
  *
- * Useful when OCR splits:
+ * This works when:
  *
- * Total balance
- * $2,032.49
+ * Statement balance $1,441.49
+ *
+ * OR:
+ *
+ * Statement balance
+ * $1,441.49
+ *
+ * OR OCR produces:
+ *
+ * Statement balance       1,441.49
  */
-function extractMoneyFromContext(text, labels, windowSize = 2) {
-  const lines = getLines(text);
+function extractMoneyNearLabels(text, labels) {
+  const normalized = normalizeText(text);
 
-  for (let i = 0; i < lines.length; i++) {
-    const current = lines[i].toLowerCase();
+  for (const label of labels) {
 
-    const matched = labels.some(label =>
-      current.includes(label.toLowerCase())
+    const escapedLabel = label.replace(
+      /[.*+?^${}()|[\]\\]/g,
+      "\\$&"
     );
 
-    if (!matched) {
-      continue;
+    /*
+     * Same line / nearby value.
+     */
+    const regex = new RegExp(
+      `${escapedLabel}\\s*(?:[:\\-]|\\$|CAD\\s*)?\\s*(-?\\$?\\s*\\d[\\d,]*(?:\\.\\d{1,2})?)`,
+      "i"
+    );
+
+    const match = normalized.match(regex);
+
+    if (match) {
+      const value = moneyToNumber(match[1]);
+
+      if (value !== null) {
+        return value;
+      }
     }
 
-    const start = Math.max(0, i - 0);
-    const end = Math.min(
-      lines.length,
-      i + windowSize + 1
-    );
 
-    const context = lines.slice(start, end).join(" ");
+    /*
+     * Handle OCR/PDF where label and amount
+     * are separated by a newline.
+     */
+    const lines = normalized.split("\n");
 
-    const matches = context.match(
-      /(?:\$|CAD\s*)?\(?-?\d{1,3}(?:,\d{3})*(?:\.\d{2})?\)?/gi
-    );
+    for (let i = 0; i < lines.length; i++) {
 
-    if (matches) {
-      const values = matches
-        .map(parseMoney)
-        .filter(value => value !== null);
+      if (
+        lines[i]
+          .toLowerCase()
+          .includes(label.toLowerCase())
+      ) {
 
-      if (values.length > 0) {
-        return values[values.length - 1];
+        /*
+         * First check the same line.
+         */
+        const sameLine = extractMoneyFromString(
+          lines[i].replace(
+            new RegExp(escapedLabel, "i"),
+            ""
+          )
+        );
+
+        if (sameLine !== null) {
+          return sameLine;
+        }
+
+
+        /*
+         * Then check the next few lines.
+         */
+        for (
+          let offset = 1;
+          offset <= 3 && i + offset < lines.length;
+          offset++
+        ) {
+
+          const nextValue = extractMoneyFromString(
+            lines[i + offset]
+          );
+
+          if (nextValue !== null) {
+            return nextValue;
+          }
+        }
       }
     }
   }
@@ -148,99 +188,12 @@ function extractMoneyFromContext(text, labels, windowSize = 2) {
   return null;
 }
 
-/**
- * Extract a date from the same line as a label.
- */
-function extractDateFromSameLine(text, labels) {
-  const lines = getLines(text);
 
-  const datePatterns = [
-    // Aug 19, 2026
-    /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{4}\b/i,
+/* =========================================================
+   DATE EXTRACTION
+   ========================================================= */
 
-    // August 19, 2026
-    /\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}\b/i,
-
-    // 08/19/2026
-    /\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/,
-
-    // 2026-08-19
-    /\b\d{4}-\d{1,2}-\d{1,2}\b/,
-  ];
-
-  for (const line of lines) {
-    const lowerLine = line.toLowerCase();
-
-    const matched = labels.some(label =>
-      lowerLine.includes(label.toLowerCase())
-    );
-
-    if (!matched) {
-      continue;
-    }
-
-    for (const pattern of datePatterns) {
-      const match = line.match(pattern);
-
-      if (match) {
-        return normalizeDate(match[0]);
-      }
-    }
-  }
-
-  return null;
-}
-
-/**
- * Extract a date from a small context window.
- */
-function extractDateFromContext(text, labels, windowSize = 3) {
-  const lines = getLines(text);
-
-  const datePatterns = [
-    /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{4}\b/i,
-
-    /\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}\b/i,
-
-    /\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/,
-
-    /\b\d{4}-\d{1,2}-\d{1,2}\b/,
-  ];
-
-  for (let i = 0; i < lines.length; i++) {
-    const lowerLine = lines[i].toLowerCase();
-
-    const matched = labels.some(label =>
-      lowerLine.includes(label.toLowerCase())
-    );
-
-    if (!matched) {
-      continue;
-    }
-
-    const context = lines
-      .slice(
-        i,
-        Math.min(lines.length, i + windowSize + 1)
-      )
-      .join(" ");
-
-    for (const pattern of datePatterns) {
-      const match = context.match(pattern);
-
-      if (match) {
-        return normalizeDate(match[0]);
-      }
-    }
-  }
-
-  return null;
-}
-
-/**
- * Normalize common date formats.
- */
-function normalizeDate(value) {
+function parseDateValue(value) {
   if (!value) {
     return null;
   }
@@ -249,34 +202,136 @@ function normalizeDate(value) {
     .replace(/\s+/g, " ")
     .trim();
 
-  return cleaned;
+  /*
+   * Month name formats:
+   *
+   * Aug 14, 2026
+   * August 14, 2026
+   * Aug 14 2026
+   */
+  const monthDate = cleaned.match(
+    /\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?(?:,)?\s+\d{4}\b/i
+  );
+
+  if (monthDate) {
+    return monthDate[0].replace(
+      /(\d{1,2})(st|nd|rd|th)/i,
+      "$1"
+    );
+  }
+
+
+  /*
+   * Numeric formats:
+   *
+   * 08/14/2026
+   * 08-14-2026
+   * 2026-08-14
+   */
+  const numericDate = cleaned.match(
+    /\b(?:\d{1,4}[\/-]\d{1,2}[\/-]\d{1,4})\b/
+  );
+
+  if (numericDate) {
+    return numericDate[0];
+  }
+
+  return null;
 }
 
+
 /**
- * Extract ordinary text from a line.
+ * Extract date near a label.
+ *
+ * Supports:
+ *
+ * Minimum payment due
+ * Aug 14, 2026
+ *
+ * Payment due: Aug 19, 2026
+ *
+ * Due date
+ * 08/19/2026
  */
-function extractText(text, labels) {
-  const lines = getLines(text);
+function extractDateNearLabels(text, labels) {
+  const normalized = normalizeText(text);
+  const lines = normalized.split("\n");
 
-  for (const line of lines) {
-    const lowerLine = line.toLowerCase();
+  for (const label of labels) {
 
-    for (const label of labels) {
-      const index = lowerLine.indexOf(
-        label.toLowerCase()
+    const escapedLabel = label.replace(
+      /[.*+?^${}()|[\]\\]/g,
+      "\\$&"
+    );
+
+
+    /*
+     * Same line.
+     */
+    const sameLineRegex = new RegExp(
+      `${escapedLabel}\\s*(?:[:\\-])?\\s*(.{0,80})`,
+      "i"
+    );
+
+    const sameLineMatch = normalized.match(
+      sameLineRegex
+    );
+
+    if (sameLineMatch) {
+      const date = parseDateValue(
+        sameLineMatch[1]
       );
 
-      if (index === -1) {
-        continue;
+      if (date) {
+        return date;
       }
+    }
 
-      const result = line
-        .substring(index + label.length)
-        .replace(/^[:\-\s]+/, "")
-        .trim();
 
-      if (result) {
-        return result;
+    /*
+     * Label may be on one line and
+     * date on the following line.
+     */
+    for (let i = 0; i < lines.length; i++) {
+
+      if (
+        lines[i]
+          .toLowerCase()
+          .includes(label.toLowerCase())
+      ) {
+
+        /*
+         * Same line first.
+         */
+        const sameLineDate = parseDateValue(
+          lines[i].replace(
+            new RegExp(escapedLabel, "i"),
+            ""
+          )
+        );
+
+        if (sameLineDate) {
+          return sameLineDate;
+        }
+
+
+        /*
+         * Search next 3 lines.
+         */
+        for (
+          let offset = 1;
+          offset <= 3 && i + offset < lines.length;
+          offset++
+        ) {
+
+          const nextDate = parseDateValue(
+            lines[i + offset]
+          );
+
+          if (nextDate) {
+            return nextDate;
+          }
+        }
       }
     }
   }
@@ -284,239 +339,332 @@ function extractText(text, labels) {
   return null;
 }
 
-// ---------------------------------------------------------
-// CREDIT CARD EXTRACTION
-// ---------------------------------------------------------
+
+/* =========================================================
+   TEXT EXTRACTION
+   ========================================================= */
+
+function extractText(text, labels) {
+  const normalized = normalizeText(text);
+  const lines = normalized.split("\n");
+
+  for (const label of labels) {
+
+    const escapedLabel = label.replace(
+      /[.*+?^${}()|[\]\\]/g,
+      "\\$&"
+    );
+
+    for (let i = 0; i < lines.length; i++) {
+
+      const regex = new RegExp(
+        `^\\s*${escapedLabel}\\s*[:\\-]?\\s*(.*)$`,
+        "i"
+      );
+
+      const match = lines[i].match(regex);
+
+      if (match && match[1].trim()) {
+        return match[1].trim();
+      }
+
+      /*
+       * Handle:
+       *
+       * Employer
+       * CIBC
+       */
+      if (
+        lines[i]
+          .toLowerCase()
+          .includes(label.toLowerCase())
+      ) {
+
+        if (i + 1 < lines.length) {
+          const next = lines[i + 1].trim();
+
+          if (next) {
+            return next;
+          }
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+
+/* =========================================================
+   INCOME
+   ========================================================= */
+
+function extractFirstMoney(text, labels) {
+  return extractMoneyNearLabels(
+    text,
+    labels
+  );
+}
+
+
+function extractIncomeFields(text) {
+
+  const netPay = extractFirstMoney(text, [
+    "net pay",
+    "net earnings",
+    "take home pay",
+    "take-home pay",
+    "net amount",
+    "net income",
+    "net payment",
+  ]);
+
+
+  const grossPay = extractFirstMoney(text, [
+    "gross pay",
+    "gross earnings",
+    "gross amount",
+    "total earnings",
+    "regular earnings",
+  ]);
+
+
+  const hourlyRate = extractFirstMoney(text, [
+    "hourly rate",
+    "pay rate",
+    "hourly wage",
+    "rate of pay",
+  ]);
+
+
+  const employer = extractText(text, [
+    "employer",
+    "company",
+    "employer name",
+  ]);
+
+
+  const employee = extractText(text, [
+    "employee name",
+    "employee",
+    "name",
+  ]);
+
+
+  const payDate =
+    extractDateNearLabels(text, [
+      "pay date",
+      "payment date",
+      "date paid",
+      "paid date",
+    ]);
+
+
+  const payPeriod =
+    extractText(text, [
+      "pay period",
+      "pay period ending",
+      "period ending",
+    ]);
+
+
+  return {
+    employer,
+    employee,
+
+    /*
+     * Net pay is preferred because this is
+     * the actual amount entering the budget.
+     */
+    amount:
+      netPay ??
+      grossPay ??
+      0,
+
+    netPay,
+    grossPay,
+    hourlyRate,
+
+    payDate,
+    payPeriod,
+
+    source: "Smart Scan",
+  };
+}
+
+
+/* =========================================================
+   CREDIT CARD EXTRACTION
+   ========================================================= */
 
 function extractCreditCardFields(text) {
 
   /*
-   * -------------------------------------------------------
-   * BALANCE
-   * -------------------------------------------------------
+   * IMPORTANT:
    *
-   * CIBC statement example:
+   * Do NOT use simply:
    *
-   * Total balance       $2,032.49
+   * extractMoney(text, "balance")
    *
-   * We intentionally prioritize "total balance".
+   * because OCR may encounter:
    *
-   * DO NOT use a generic "balance" search first because
-   * OCR can encounter unrelated numbers such as:
+   * Available balance
+   * Current balance
+   * Statement balance
    *
-   * 21.99% interest
-   * 32.49 over credit limit
-   * etc.
+   * and return the wrong number.
+   *
+   * We therefore use very specific labels first.
    */
 
-  let balance = extractMoneyFromSameLine(text, [
-    "total balance",
-    "new balance",
-    "closing balance",
+
+  /* -------------------------------------------------------
+     BALANCE
+     ------------------------------------------------------- */
+
+  let balance = extractMoneyNearLabels(text, [
+
+    /*
+     * Most specific first.
+     */
     "statement balance",
+
+    "statement amount",
+
+    "statement total",
+
+    "closing balance",
+
+    "current balance",
+
+    "balance owing",
+
+    "amount owing",
+
+    "total balance",
+
+    "balance due",
+
+    "new balance",
+
   ]);
 
+
+  /*
+   * Some statements simply have a SUMMARY section
+   * containing:
+   *
+   * Balance       $2,032.49
+   *
+   * This fallback is intentionally LAST.
+   */
   if (balance === null) {
-    balance = extractMoneyFromContext(text, [
-      "total balance",
-      "new balance",
-      "closing balance",
-      "statement balance",
+    balance = extractMoneyNearLabels(text, [
+      "balance",
     ]);
   }
 
-  /*
-   * -------------------------------------------------------
-   * CREDIT LIMIT
-   * -------------------------------------------------------
-   *
-   * CIBC may display:
-   *
-   * Limit $2,000.00
-   *
-   * instead of:
-   *
-   * Credit limit $2,000.00
-   */
 
-  let creditLimit = extractMoneyFromSameLine(text, [
-    "credit limit",
-    "credit limit:",
-    "limit",
-  ]);
+  /* -------------------------------------------------------
+     CREDIT LIMIT
+     ------------------------------------------------------- */
 
-  if (creditLimit === null) {
-    creditLimit = extractMoneyFromContext(text, [
+  const creditLimit =
+    extractMoneyNearLabels(text, [
+
       "credit limit",
+
+      "total credit limit",
+
+      "authorized credit limit",
+
+      "approved credit limit",
+
+      "card limit",
+
       "limit",
+
     ]);
-  }
 
-  /*
-   * -------------------------------------------------------
-   * AVAILABLE CREDIT
-   * -------------------------------------------------------
-   *
-   * CIBC commonly shows:
-   *
-   * Available $0.00
-   *
-   * Therefore we cannot only search for
-   * "available credit".
-   */
 
-  let availableCredit = extractMoneyFromSameLine(text, [
-    "available credit",
-    "available",
-  ]);
+  /* -------------------------------------------------------
+     AVAILABLE CREDIT
+     ------------------------------------------------------- */
 
-  if (availableCredit === null) {
-    availableCredit = extractMoneyFromContext(text, [
+  const availableCredit =
+    extractMoneyNearLabels(text, [
+
       "available credit",
-      "available",
+
+      "available amount",
+
+      "available balance",
+
+      "credit available",
+
+      "remaining credit",
+
+      "remaining available credit",
+
     ]);
-  }
 
-  /*
-   * -------------------------------------------------------
-   * MINIMUM PAYMENT
-   * -------------------------------------------------------
-   *
-   * VERY IMPORTANT:
-   *
-   * We prioritize "total minimum payment".
-   *
-   * We do NOT simply search for "minimum payment"
-   * because the statement may contain:
-   *
-   * Amount over credit limit $32.49
-   * Remaining minimum payment $70.63
-   * Total minimum payment $103.12
-   *
-   * The correct value is $103.12.
-   */
 
-  let minimumPayment = extractMoneyFromSameLine(text, [
-    "total minimum payment",
-    "minimum payment due",
-    "minimum payment",
-  ]);
+  /* -------------------------------------------------------
+     MINIMUM PAYMENT
+     ------------------------------------------------------- */
 
-  if (minimumPayment === null) {
-    minimumPayment = extractMoneyFromContext(text, [
-      "total minimum payment",
-      "minimum payment due",
+  const minimumPayment =
+    extractMoneyNearLabels(text, [
+
+      /*
+       * Very specific labels first.
+       */
       "minimum payment",
+
+      "minimum payment amount",
+
+      "minimum amount due",
+
+      "minimum due",
+
+      "payment due amount",
+
     ]);
-  }
 
-  /*
-   * -------------------------------------------------------
-   * DUE DATE
-   * -------------------------------------------------------
-   *
-   * CIBC example:
-   *
-   * Total Minimum Payment due by Aug 19, 2026
-   *
-   * We search specifically around:
-   *
-   * "due by"
-   *
-   * "payment due"
-   *
-   * "minimum payment due"
-   */
 
-  let dueDate = extractDateFromSameLine(text, [
-    "due by",
-    "payment due",
-    "minimum payment due",
-    "due date",
-  ]);
+  /* -------------------------------------------------------
+     DUE DATE
+     ------------------------------------------------------- */
 
-  if (dueDate === null) {
-    dueDate = extractDateFromContext(text, [
-      "due by",
-      "payment due",
+  const dueDate =
+    extractDateNearLabels(text, [
+
+      /*
+       * CIBC example:
+       *
+       * Minimum payment due
+       * Aug 14, 2026
+       */
       "minimum payment due",
+
+      "payment due date",
+
+      "payment due",
+
       "due date",
+
+      "due on",
+
+      "minimum amount due",
+
     ]);
-  }
 
-  /*
-   * -------------------------------------------------------
-   * FALLBACK DUE DATE
-   * -------------------------------------------------------
-   *
-   * If OCR splits:
-   *
-   * Total Minimum Payment due by
-   * Aug 19, 2026
-   *
-   * the context search above should catch it.
-   *
-   * This final fallback looks for any date close to the
-   * words "due".
-   */
-
-  if (dueDate === null) {
-    dueDate = extractDateFromContext(text, [
-      "due",
-    ], 4);
-  }
-
-  /*
-   * -------------------------------------------------------
-   * BANK
-   * -------------------------------------------------------
-   */
-
-  let bank = null;
-
-  const upperText = text.toUpperCase();
-
-  if (upperText.includes("CIBC")) {
-    bank = "CIBC";
-  } else if (upperText.includes("RBC")) {
-    bank = "RBC";
-  } else if (upperText.includes("TD CANADA")) {
-    bank = "TD";
-  } else if (upperText.includes("SCOTIABANK")) {
-    bank = "Scotiabank";
-  } else if (upperText.includes("BMO")) {
-    bank = "BMO";
-  } else if (
-    upperText.includes("CANADIAN TIRE")
-  ) {
-    bank = "Canadian Tire";
-  }
-
-  /*
-   * -------------------------------------------------------
-   * CARD NAME
-   * -------------------------------------------------------
-   */
-
-  let cardName = null;
-
-  if (
-    upperText.includes("CIBC DIVIDEND")
-  ) {
-    cardName = "CIBC Dividend Visa";
-  }
-
-  if (!cardName) {
-    cardName = extractText(text, [
-      "card name",
-      "card type",
-    ]);
-  }
 
   return {
-    bank,
 
-    cardName,
+    bank: null,
+
+    cardName: null,
 
     balance,
 
@@ -530,210 +678,120 @@ function extractCreditCardFields(text) {
   };
 }
 
-// ---------------------------------------------------------
-// INCOME
-// ---------------------------------------------------------
 
-function extractIncomeFields(text) {
-
-  const netPay = extractMoneyFromSameLine(text, [
-    "net pay",
-    "net earnings",
-    "take home pay",
-    "take-home pay",
-    "net amount",
-    "net income",
-  ]);
-
-  const grossPay = extractMoneyFromSameLine(text, [
-    "gross pay",
-    "gross earnings",
-    "gross amount",
-    "total earnings",
-    "regular earnings",
-  ]);
-
-  const hourlyRate = extractMoneyFromSameLine(text, [
-    "hourly rate",
-    "pay rate",
-    "rate",
-  ]);
-
-  const employer = extractText(text, [
-    "employer",
-    "company",
-  ]);
-
-  const employee = extractText(text, [
-    "employee name",
-    "employee",
-    "name",
-  ]);
-
-  let payDate = extractDateFromSameLine(text, [
-    "pay date",
-    "payment date",
-    "date paid",
-  ]);
-
-  if (!payDate) {
-    payDate = extractDateFromContext(text, [
-      "pay date",
-      "payment date",
-      "date paid",
-    ]);
-  }
-
-  const payPeriod = extractText(text, [
-    "pay period",
-    "pay period ending",
-    "period ending",
-  ]);
-
-  return {
-    employer,
-    employee,
-
-    amount:
-      netPay ??
-      grossPay ??
-      0,
-
-    netPay,
-
-    grossPay,
-
-    hourlyRate,
-
-    payDate,
-
-    payPeriod,
-
-    source: "Smart Scan",
-  };
-}
-
-// ---------------------------------------------------------
-// RECEIPT
-// ---------------------------------------------------------
+/* =========================================================
+   RECEIPT
+   ========================================================= */
 
 function extractReceiptFields(text) {
 
-  const merchant = extractText(text, [
-    "merchant",
-    "store",
-    "vendor",
-  ]);
-
-  const subtotal = extractMoneyFromSameLine(text, [
-    "subtotal",
-  ]);
-
-  const tax = extractMoneyFromSameLine(text, [
-    "tax",
-    "hst",
-    "gst",
-    "pst",
-  ]);
-
-  const total = extractMoneyFromSameLine(text, [
-    "grand total",
-    "total",
-    "amount paid",
-  ]);
-
-  let date = extractDateFromSameLine(text, [
-    "date",
-    "transaction date",
-  ]);
-
-  if (!date) {
-    date = extractDateFromContext(text, [
-      "date",
-      "transaction date",
-    ]);
-  }
-
   return {
-    merchant,
 
-    subtotal,
+    merchant: extractText(text, [
+      "merchant",
+      "store",
+      "vendor",
+      "seller",
+    ]),
 
-    tax,
+    subtotal: extractMoneyNearLabels(text, [
+      "subtotal",
+      "sub total",
+    ]),
 
-    total,
+    tax: extractMoneyNearLabels(text, [
+      "tax",
+      "sales tax",
+      "hst",
+      "gst",
+      "pst",
+    ]),
 
-    date,
+    total: extractMoneyNearLabels(text, [
+      "grand total",
+      "total",
+      "amount paid",
+      "total amount",
+    ]),
+
+    date: extractDateNearLabels(text, [
+      "transaction date",
+      "purchase date",
+      "date",
+    ]),
   };
 }
 
-// ---------------------------------------------------------
-// STATEMENT
-// ---------------------------------------------------------
+
+/* =========================================================
+   BANK ACCOUNT
+   ========================================================= */
+
+function extractBankAccountFields(text) {
+
+  return {
+
+    account: extractText(text, [
+      "account name",
+      "account",
+      "account type",
+    ]),
+
+    balance:
+      extractMoneyNearLabels(text, [
+        "current balance",
+        "account balance",
+        "available balance",
+        "balance",
+      ]),
+
+    deposit:
+      extractMoneyNearLabels(text, [
+        "deposit",
+        "total deposits",
+        "deposit amount",
+      ]),
+
+    withdrawal:
+      extractMoneyNearLabels(text, [
+        "withdrawal",
+        "total withdrawals",
+        "withdrawal amount",
+      ]),
+  };
+}
+
+
+/* =========================================================
+   STATEMENT
+   ========================================================= */
 
 function extractStatementFields(text) {
 
-  const openingBalance = extractMoneyFromSameLine(text, [
-    "opening balance",
-    "beginning balance",
-  ]);
-
-  const closingBalance = extractMoneyFromSameLine(text, [
-    "closing balance",
-    "ending balance",
-  ]);
-
   return {
-    openingBalance,
 
-    closingBalance,
+    openingBalance:
+      extractMoneyNearLabels(text, [
+        "opening balance",
+        "beginning balance",
+        "starting balance",
+      ]),
+
+    closingBalance:
+      extractMoneyNearLabels(text, [
+        "closing balance",
+        "ending balance",
+        "statement balance",
+      ]),
 
     transactions: [],
   };
 }
 
-// ---------------------------------------------------------
-// BANK ACCOUNT
-// ---------------------------------------------------------
 
-function extractBankAccountFields(text) {
-
-  let balance = extractMoneyFromSameLine(text, [
-    "available balance",
-    "account balance",
-    "current balance",
-  ]);
-
-  if (balance === null) {
-    balance = extractMoneyFromSameLine(text, [
-      "balance",
-    ]);
-  }
-
-  const deposit = extractMoneyFromSameLine(text, [
-    "deposit",
-    "deposits",
-  ]);
-
-  const withdrawal = extractMoneyFromSameLine(text, [
-    "withdrawal",
-    "withdrawals",
-  ]);
-
-  return {
-    account: null,
-
-    balance,
-
-    deposit,
-
-    withdrawal,
-  };
-}
-
-// ---------------------------------------------------------
-// MAIN EXPORT
-// ---------------------------------------------------------
+/* =========================================================
+   MAIN EXPORT
+   ========================================================= */
 
 export function extractFields(
   documentType,
@@ -745,17 +803,22 @@ export function extractFields(
     case "credit-card":
       return extractCreditCardFields(text);
 
+
     case "receipt":
       return extractReceiptFields(text);
+
 
     case "income":
       return extractIncomeFields(text);
 
+
     case "statement":
       return extractStatementFields(text);
 
+
     case "bank-account":
       return extractBankAccountFields(text);
+
 
     default:
       return {};
