@@ -2,53 +2,91 @@
  * OCRPipeline.js
  *
  * Budget Blossom
- * Complete OCR Pipeline
+ * Free Browser OCR using Tesseract.js
  */
 
-import GoogleVisionProvider from "./providers/GoogleVisionProvider";
-import OCRService from "./OCRService";
+import { createWorker } from "tesseract.js";
 
 import { classifyDocument } from "./DocumentClassifier";
 import { extractFields } from "./FieldExtractor";
 import { validateExtractedData } from "./ValidationEngine";
 
-const provider = new GoogleVisionProvider();
-
-const service = new OCRService(provider);
-
 export async function processDocument(file) {
-  // Step 1: Scan document
-  const result = await service.scanDocument(file);
+  if (!file) {
+    throw new Error("No document selected.");
+  }
 
-  // Step 2: Classify document
-  const documentType = classifyDocument(result.text);
+  let worker;
 
-  // Step 3: Extract fields
-  const fields = extractFields(
-    documentType,
-    result.text
-  );
+  try {
+    console.log("Starting Tesseract OCR:", file.name);
 
-  // Step 4: Validate extracted data
-  const validation = validateExtractedData(
-    documentType,
-    fields
-  );
+    // Create Tesseract OCR worker
+    worker = await createWorker("eng");
 
-  // Step 5: Return complete document
-  return {
-    provider: result.provider,
+    // Scan the document
+    const result = await worker.recognize(file);
 
-    filename: result.filename,
+    const text = result?.data?.text || "";
 
-    confidence: result.confidence,
+    console.log("OCR TEXT:", text);
 
-    documentType,
+    if (!text.trim()) {
+      throw new Error(
+        "No text could be detected in this document."
+      );
+    }
 
-    fields,
+    // Step 1: Classify document
+    const documentType = classifyDocument(text);
 
-    validation,
+    // Step 2: Extract fields
+    const fields = extractFields(
+      documentType,
+      text
+    );
 
-    raw: result.raw,
-  };
+    // Step 3: Validate extracted data
+    const validation = validateExtractedData(
+      documentType,
+      fields
+    );
+
+    // Step 4: Return complete document
+    return {
+      provider: "tesseract.js",
+
+      filename: file.name,
+
+      confidence:
+        result?.data?.confidence || 0,
+
+      documentType,
+
+      fields,
+
+      validation,
+
+      raw: {
+        text,
+      },
+    };
+
+  } catch (error) {
+    console.error(
+      "TESSERACT OCR ERROR:",
+      error
+    );
+
+    throw new Error(
+      error?.message ||
+        "Unable to scan this document."
+    );
+
+  } finally {
+    // Always stop the OCR worker
+    if (worker) {
+      await worker.terminate();
+    }
+  }
 }
