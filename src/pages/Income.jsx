@@ -1254,17 +1254,17 @@ function JobCard({
         job.overtimeMultiplier ??
         1.5,
 
-      isStatHoliday:
-        Boolean(
-          shift.isStatHoliday ??
-            shift.type ===
-              "stat_1x" ||
-            shift.type ===
-              "stat_1_5x" ||
-            shift.type ===
-              "stat_2x" ||
-            shift.hol
-        ),
+     isStatHoliday:
+  shift.isStatHoliday ??
+  (
+    (
+      shift.type === "stat" ||
+      shift.type === "stat_1x" ||
+      shift.type === "stat_1_5x" ||
+      shift.type === "stat_2x"
+    ) ||
+    Boolean(shift.hol)
+  ),
 
       statMultiplier:
         shift.statMultiplier ??
