@@ -8,6 +8,7 @@
  * Home → Dashboard
  * Income → Work Hours / Payroll / Paychecks
  * Expenses → Bills / Recurring Expenses
+ * Calendar → Work shifts / Paydays / Bills / Notes / Reminders
  * Goals → Savings / Financial Goals
  * More → Additional features / Settings
  */
@@ -29,6 +30,11 @@ const NAV_ITEMS = [
     id: "expenses",
     label: "Expenses",
     emoji: "🧾",
+  },
+  {
+    id: "calendar",
+    label: "Calendar",
+    emoji: "📅",
   },
   {
     id: "goals",
@@ -53,13 +59,14 @@ export default function BottomNav({
         bottom: 0,
         left: 0,
         right: 0,
-        height: "64px",
+        minHeight: "64px",
         backgroundColor: "var(--nav-bg)",
         borderTop: "1.5px solid var(--nav-border)",
         boxShadow: "var(--nav-shadow)",
         display: "flex",
         justifyContent: "space-around",
         alignItems: "center",
+        paddingTop: "4px",
         paddingBottom: "env(safe-area-inset-bottom)",
         paddingLeft: "env(safe-area-inset-left)",
         paddingRight: "env(safe-area-inset-right)",
@@ -75,6 +82,7 @@ export default function BottomNav({
             type="button"
             onClick={() => onNavigate(item.id)}
             aria-label={item.label}
+            aria-current={isActive ? "page" : undefined}
             style={{
               display: "flex",
               flexDirection: "column",
@@ -82,7 +90,8 @@ export default function BottomNav({
               justifyContent: "center",
               gap: "3px",
               flex: 1,
-              height: "100%",
+              minWidth: 0,
+              height: "64px",
               padding: "6px 2px 4px",
               border: "none",
               borderRadius: "12px",
@@ -117,7 +126,16 @@ export default function BottomNav({
               {item.emoji}
             </span>
 
-            <span>{item.label}</span>
+            <span
+              style={{
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                maxWidth: "100%",
+              }}
+            >
+              {item.label}
+            </span>
           </button>
         );
       })}
