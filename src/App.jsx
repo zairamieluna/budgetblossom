@@ -10,6 +10,7 @@ import { useState } from "react";
 import "./styles/globals.css";
 
 import { ThemeProvider } from "./context/ThemeContext";
+
 import BottomNav from "./components/common/BottomNav";
 
 import Dashboard from "./pages/Dashboard";
@@ -26,25 +27,20 @@ import Jars from "./pages/Jars";
 const PAGES = {
   dashboard: Dashboard,
 
-  // Money
-  money: Expenses,
-
-  // Goals
-  goals: Savings,
-
-  // More
-  more: Settings,
-
-  // Existing pages
   expenses: Expenses,
   income: Income,
   cards: Cards,
   savings: Savings,
   forecast: Forecast,
   calendar: Calendar,
-  settings: Settings,
   debts: Debts,
   jars: Jars,
+  settings: Settings,
+
+  // Bottom navigation
+  money: Expenses,
+  goals: Savings,
+  more: Settings,
 };
 
 export default function App() {
@@ -55,7 +51,9 @@ export default function App() {
   return (
     <ThemeProvider>
       <div className="app-shell">
-        <CurrentPage />
+        <CurrentPage
+          onNavigate={setActivePage}
+        />
 
         <BottomNav
           activePage={activePage}
