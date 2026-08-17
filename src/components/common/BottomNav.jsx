@@ -1,6 +1,9 @@
 /**
  * BottomNav.jsx
  * Budget Blossom
+ *
+ * Main bottom navigation.
+ * Scanner has been completely removed.
  */
 
 import { typography, transitions } from "../../ui/designTokens";
@@ -9,7 +12,6 @@ const NAV_ITEMS = [
   { id: "dashboard", label: "Home", emoji: "🏠" },
   { id: "money", label: "Money", emoji: "💳" },
   { id: "goals", label: "Goals", emoji: "🎯" },
-  { id: "scan", label: "Scan", emoji: "📷" },
   { id: "more", label: "More", emoji: "☰" },
 ];
 
@@ -38,13 +40,16 @@ export default function BottomNav({
       }}
     >
       {NAV_ITEMS.map((item) => {
-        const isActive = activePage === item.id;
+        const isActive =
+          activePage === item.id;
 
         return (
           <button
             key={item.id}
             type="button"
-            onClick={() => onNavigate(item.id)}
+            onClick={() =>
+              onNavigate(item.id)
+            }
             style={{
               display: "flex",
               flexDirection: "column",
@@ -80,14 +85,18 @@ export default function BottomNav({
                 transform: isActive
                   ? "scale(1.1)"
                   : "scale(1)",
-                opacity: isActive ? 1 : 0.7,
+                opacity: isActive
+                  ? 1
+                  : 0.7,
                 transition: `all ${transitions.base}`,
               }}
             >
               {item.emoji}
             </span>
 
-            <span>{item.label}</span>
+            <span>
+              {item.label}
+            </span>
           </button>
         );
       })}
