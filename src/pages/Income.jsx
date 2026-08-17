@@ -1,24 +1,40 @@
 /**
- * Income.jsx
- *
  * Budget Blossom
+ *
+ * Income.jsx
  *
  * MAIN INCOME + WORK HOURS + PAYROLL SYSTEM
  *
- * Flow:
- * Work Hours
- *    ↓
- * Pay Period
- *    ↓
- * Payroll Calculation
- *    ↓
- * Estimated Gross / Deductions / Net
- *    ↓
- * Actual Paycheck
- *    ↓
- * Budget Pool
+ * IMPORTANT PAYROLL MODEL:
  *
- * Preserves the existing Supabase user_data.data structure.
+ * Work Date
+ *     ↓
+ * Pay Period
+ *     ↓
+ * Payroll Calculation
+ *     ↓
+ * Payday
+ *
+ * PAY PERIOD AND PAYDAY ARE ALWAYS SEPARATE.
+ *
+ * Example:
+ *
+ * Pay Period:
+ * July 20 – August 2
+ *
+ * Payday:
+ * August 7
+ *
+ * The paycheck contains work from July 20–August 2,
+ * but the money arrives August 7.
+ *
+ * Existing Supabase structure is preserved:
+ *
+ * user_data.data
+ *   jobs
+ *   shifts
+ *   sent
+ *   actualPaychecks
  */
 
 import {
@@ -33,6 +49,7 @@ import { supabase } from "../lib/supabaseClient";
 import {
   calculateShift,
   calculatePaycheck,
+  estimateNetPay,
 } from "../services/income/incomeCalculator";
 
 /* =========================================================
@@ -55,18 +72,28 @@ const DEFAULT_JOBS = [
     vacationPercent: 0,
 
     deductionPercent: 15,
-
     ded: 15,
 
     statMultiplier: 1.5,
 
+    freezingPremium: 0,
+    eveningPremium: 0,
+
     payFrequency: "biweekly",
 
+    /*
+     * IMPORTANT:
+     * These are independent.
+     */
     payPeriodStart: "",
     payPeriodEnd: "",
     payday: "",
 
-    color: 0,
+    breakMinutes: 30,
+
+    province: "Ontario",
+
+    active: true,
   },
 
   {
@@ -84,10 +111,12 @@ const DEFAULT_JOBS = [
     vacationPercent: 0,
 
     deductionPercent: 15,
-
     ded: 15,
 
     statMultiplier: 1.5,
+
+    freezingPremium: 0,
+    eveningPremium: 0,
 
     payFrequency: "biweekly",
 
@@ -95,7 +124,11 @@ const DEFAULT_JOBS = [
     payPeriodEnd: "",
     payday: "",
 
-    color: 1,
+    breakMinutes: 30,
+
+    province: "Ontario",
+
+    active: true,
   },
 
   {
@@ -113,18 +146,39 @@ const DEFAULT_JOBS = [
     vacationPercent: 0,
 
     deductionPercent: 20,
-
     ded: 20,
 
     statMultiplier: 1.5,
 
+    /*
+     * Put Ariel's actual freezer premium here
+     * when you know the amount.
+     *
+     * Example:
+     * 1.50 = $1.50/hour
+     */
+    freezingPremium: 0,
+    eveningPremium: 0,
+
     payFrequency: "biweekly",
 
-    payPeriodStart: "",
-    payPeriodEnd: "",
-    payday: "",
+    /*
+     * Your actual example:
+     *
+     * July 20 – August 2
+     * Payday August 7
+     *
+     * These are NOT mathematically derived.
+     */
+    payPeriodStart: "2026-07-20",
+    payPeriodEnd: "2026-08-02",
+    payday: "2026-08-07",
 
-    color: 2,
+    breakMinutes: 30,
+
+    province: "Ontario",
+
+    active: true,
   },
 ];
 
@@ -134,52 +188,342 @@ const DEFAULT_JOBS = [
 
 function numberOrZero(value) {
   const n = Number(value);
-  return Number.isFinite(n) ? n : 0;
+
+  return Number.isFinite(n)
+    ? n
+    : 0;
 }
 
 function money(value) {
-  return new Intl.NumberFormat("en-CA", {
-    style: "currency",
-    currency: "CAD",
-  }).format(numberOrZero(value));
+  return new Intl.NumberFormat(
+    "en-CA",
+    {
+      style: "currency",
+      currency: "CAD",
+    }
+  ).format(
+    numberOrZero(value)
+  );
 }
 
-function dateString(date = new Date()) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
+function dateString(
+  date = new Date()
+) {
+  const year =
+    date.getFullYear();
+
+  const month =
+    String(
+      date.getMonth() + 1
+    ).padStart(2, "0");
+
+  const day =
+    String(
+      date.getDate()
+    ).padStart(2, "0");
 
   return `${year}-${month}-${day}`;
 }
 
+function parseDate(value) {
+  if (!value) {
+    return null;
+  }
+
+  const date =
+    new Date(
+      `${value}T12:00:00`
+    );
+
+  return Number.isNaN(
+    date.getTime()
+  )
+    ? null
+    : date;
+}
+
 function formatDate(value) {
-  if (!value) return "—";
+  if (!value) {
+    return "—";
+  }
 
-  const date = new Date(`${value}T00:00:00`);
+  const date =
+    parseDate(value);
 
-  if (Number.isNaN(date.getTime())) {
+  if (!date) {
     return value;
   }
 
-  return date.toLocaleDateString("en-CA", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  return date.toLocaleDateString(
+    "en-CA",
+    {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }
+  );
 }
 
-function addDays(dateValue, amount) {
-  const date = new Date(`${dateValue}T00:00:00`);
-  date.setDate(date.getDate() + amount);
-  return dateString(date);
+function addDays(
+  value,
+  amount
+) {
+  const date =
+    parseDate(value);
+
+  if (!date) {
+    return "";
+  }
+
+  date.setDate(
+    date.getDate() +
+      amount
+  );
+
+  return dateString(
+    date
+  );
 }
 
-function diffDays(start, end) {
-  const a = new Date(`${start}T00:00:00`);
-  const b = new Date(`${end}T00:00:00`);
+function isDateInRange(
+  date,
+  start,
+  end
+) {
+  if (
+    !date ||
+    !start ||
+    !end
+  ) {
+    return false;
+  }
+
+  return (
+    date >= start &&
+    date <= end
+  );
+}
+
+function daysBetween(
+  start,
+  end
+) {
+  const a =
+    parseDate(start);
+
+  const b =
+    parseDate(end);
+
+  if (!a || !b) {
+    return 0;
+  }
 
   return Math.round(
-    (b.getTime() - a.getTime()) / 86400000
+    (
+      b.getTime() -
+      a.getTime()
+    ) /
+      86400000
+  );
+}
+
+function makeId(
+  prefix = "id"
+) {
+  return `${prefix}-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+}
+
+/* =========================================================
+   PAY PERIOD GENERATION
+========================================================= */
+
+/*
+ * This is NOT the old semi-monthly system.
+ *
+ * The user defines:
+ *
+ * Period Start
+ * Period End
+ * Payday
+ *
+ * For biweekly schedules, future periods are generated
+ * from the user's configured period.
+ *
+ * Payday is also generated from the user's actual
+ * payday relationship to the period.
+ */
+
+function buildPayPeriodsForJob(
+  job,
+  count = 12
+) {
+  const start =
+    job?.payPeriodStart;
+
+  const end =
+    job?.payPeriodEnd;
+
+  const payday =
+    job?.payday;
+
+  if (
+    !start ||
+    !end ||
+    !payday
+  ) {
+    return [];
+  }
+
+  const duration =
+    daysBetween(
+      start,
+      end
+    );
+
+  if (
+    duration < 0
+  ) {
+    return [];
+  }
+
+  const frequency =
+    job?.payFrequency ??
+    "biweekly";
+
+  let periodLength;
+
+  if (
+    frequency ===
+    "weekly"
+  ) {
+    periodLength = 7;
+  } else if (
+    frequency ===
+    "monthly"
+  ) {
+    periodLength =
+      Math.max(
+        1,
+        duration + 1
+      );
+  } else {
+    /*
+     * Biweekly is the main household payroll pattern.
+     */
+    periodLength =
+      Math.max(
+        1,
+        duration + 1
+      );
+  }
+
+  const paydayOffset =
+    daysBetween(
+      end,
+      payday
+    );
+
+  const periods = [];
+
+  /*
+   * Generate periods before and after the anchor.
+   */
+  for (
+    let index = -6;
+    index <= count;
+    index++
+  ) {
+    const periodStart =
+      addDays(
+        start,
+        index *
+          periodLength
+      );
+
+    const periodEnd =
+      addDays(
+        end,
+        index *
+          periodLength
+      );
+
+    const periodPayday =
+      addDays(
+        periodEnd,
+        paydayOffset
+      );
+
+    if (
+      !periodStart ||
+      !periodEnd ||
+      !periodPayday
+    ) {
+      continue;
+    }
+
+    periods.push({
+      id:
+        `${job.id}|${periodStart}|${periodEnd}`,
+
+      jobId:
+        job.id,
+
+      person:
+        job.person,
+
+      employer:
+        job.employer,
+
+      title:
+        job.title,
+
+      start:
+        periodStart,
+
+      end:
+        periodEnd,
+
+      payday:
+        periodPayday,
+
+      frequency,
+    });
+  }
+
+  return periods.sort(
+    (a, b) =>
+      a.start.localeCompare(
+        b.start
+      )
+  );
+}
+
+/* =========================================================
+   FIND PERIOD FOR SHIFT
+========================================================= */
+
+function findPayPeriodForDate(
+  job,
+  date
+) {
+  const periods =
+    buildPayPeriodsForJob(
+      job,
+      24
+    );
+
+  return (
+    periods.find(
+      period =>
+        isDateInRange(
+          date,
+          period.start,
+          period.end
+        )
+    ) ??
+    null
   );
 }
 
@@ -187,611 +531,418 @@ function diffDays(start, end) {
    CANADIAN HOLIDAYS
 ========================================================= */
 
-function nthWeekdayOfMonth(year, month, weekday, nth) {
-  const first = new Date(year, month, 1);
-  const offset =
-    (7 + weekday - first.getDay()) % 7;
+function getEasterSunday(
+  year
+) {
+  const a =
+    year % 19;
+
+  const b =
+    Math.floor(
+      year / 100
+    );
+
+  const c =
+    year % 100;
+
+  const d =
+    Math.floor(
+      b / 4
+    );
+
+  const e =
+    b % 4;
+
+  const f =
+    Math.floor(
+      (b + 8) / 25
+    );
+
+  const g =
+    Math.floor(
+      (b - f + 1) / 3
+    );
+
+  const h =
+    (19 * a +
+      b -
+      d -
+      g +
+      15) %
+    30;
+
+  const i =
+    Math.floor(
+      c / 4
+    );
+
+  const k =
+    c % 4;
+
+  const l =
+    (32 +
+      2 * e +
+      2 * i -
+      h -
+      k) %
+    7;
+
+  const m =
+    Math.floor(
+      (a +
+        11 * h +
+        22 * l) /
+        451
+    );
+
+  const month =
+    Math.floor(
+      (h +
+        l -
+        7 * m +
+        114) /
+        31
+    );
+
+  const day =
+    ((h +
+      l -
+      7 * m +
+      114) %
+      31) +
+    1;
 
   return new Date(
     year,
-    month,
-    1 + offset + (nth - 1) * 7
+    month - 1,
+    day
   );
 }
 
-function lastWeekdayOfMonth(year, month, weekday) {
-  const last = new Date(year, month + 1, 0);
+function canadaHolidays(
+  year
+) {
+  const holidays = [];
 
-  const offset =
-    (7 + last.getDay() - weekday) % 7;
+  function add(
+    date,
+    name
+  ) {
+    holidays.push({
+      date:
+        dateString(
+          date
+        ),
+      name,
+    });
+  }
 
-  return new Date(
-    year,
-    month,
-    last.getDate() - offset
+  add(
+    new Date(
+      year,
+      0,
+      1
+    ),
+    "New Year's Day"
   );
+
+  /*
+   * Good Friday
+   */
+  const easter =
+    getEasterSunday(
+      year
+    );
+
+  const goodFriday =
+    new Date(
+      easter
+    );
+
+  goodFriday.setDate(
+    goodFriday.getDate() -
+      2
+  );
+
+  add(
+    goodFriday,
+    "Good Friday"
+  );
+
+  add(
+    new Date(
+      year,
+      6,
+      1
+    ),
+    "Canada Day"
+  );
+
+  /*
+   * Labour Day
+   */
+  const labour =
+    new Date(
+      year,
+      8,
+      1
+    );
+
+  while (
+    labour.getDay() !== 1
+  ) {
+    labour.setDate(
+      labour.getDate() +
+        1
+    );
+  }
+
+  add(
+    labour,
+    "Labour Day"
+  );
+
+  add(
+    new Date(
+      year,
+      10,
+      11
+    ),
+    "Remembrance Day"
+  );
+
+  add(
+    new Date(
+      year,
+      11,
+      25
+    ),
+    "Christmas Day"
+  );
+
+  add(
+    new Date(
+      year,
+      11,
+      26
+    ),
+    "Boxing Day"
+  );
+
+  return holidays;
 }
 
-function holidayDate(date) {
-  const d = new Date(`${date}T00:00:00`);
-
-  if (Number.isNaN(d.getTime())) {
+function getHoliday(
+  date
+) {
+  if (!date) {
     return null;
   }
 
-  const year = d.getFullYear();
-
-  const holidays = [];
-
-  // New Year's Day
-  holidays.push({
-    date: `${year}-01-01`,
-    name: "New Year's Day",
-  });
-
-  // Family Day — Ontario
-  holidays.push({
-    date: dateString(
-      nthWeekdayOfMonth(year, 1, 1, 3)
-    ),
-    name: "Family Day",
-  });
-
-  // Good Friday
-  const easter = calculateEaster(year);
-
-  holidays.push({
-    date: addDays(dateString(easter), -2),
-    name: "Good Friday",
-  });
-
-  // Victoria Day
-  holidays.push({
-    date: dateString(
-      lastWeekdayOfMonth(year, 4, 1)
-    ),
-    name: "Victoria Day",
-  });
-
-  // Canada Day
-  holidays.push({
-    date: `${year}-07-01`,
-    name: "Canada Day",
-  });
-
-  // Civic Holiday
-  holidays.push({
-    date: dateString(
-      nthWeekdayOfMonth(year, 7, 1, 1)
-    ),
-    name: "Civic Holiday",
-  });
-
-  // Labour Day
-  holidays.push({
-    date: dateString(
-      nthWeekdayOfMonth(year, 8, 1, 1)
-    ),
-    name: "Labour Day",
-  });
-
-  // National Day for Truth and Reconciliation
-  holidays.push({
-    date: `${year}-09-30`,
-    name: "National Day for Truth and Reconciliation",
-  });
-
-  // Thanksgiving
-  holidays.push({
-    date: dateString(
-      nthWeekdayOfMonth(year, 9, 1, 2)
-    ),
-    name: "Thanksgiving",
-  });
-
-  // Remembrance Day
-  holidays.push({
-    date: `${year}-11-11`,
-    name: "Remembrance Day",
-  });
-
-  // Christmas
-  holidays.push({
-    date: `${year}-12-25`,
-    name: "Christmas Day",
-  });
-
-  // Boxing Day
-  holidays.push({
-    date: `${year}-12-26`,
-    name: "Boxing Day",
-  });
+  const year =
+    Number(
+      date.slice(0, 4)
+    );
 
   return (
-    holidays.find(
-      holiday => holiday.date === date
-    ) ?? null
+    canadaHolidays(
+      year
+    ).find(
+      holiday =>
+        holiday.date ===
+        date
+    ) ??
+    null
   );
 }
 
-function calculateEaster(year) {
-  const a = year % 19;
-  const b = Math.floor(year / 100);
-  const c = year % 100;
-  const d = Math.floor(b / 4);
-  const e = b % 4;
-  const f = Math.floor((b + 8) / 25);
-  const g = Math.floor((b - f + 1) / 3);
-  const h =
-    (19 * a + b - d - g + 15) % 30;
-  const i = Math.floor(c / 4);
-  const k = c % 4;
-  const l =
-    (32 + 2 * e + 2 * i - h - k) % 7;
-  const m =
-    Math.floor((a + 11 * h + 22 * l) / 451);
-
-  const month =
-    Math.floor((h + l - 7 * m + 114) / 31);
-
-  const day =
-    ((h + l - 7 * m + 114) % 31) + 1;
-
-  return new Date(year, month - 1, day);
-}
-
 /* =========================================================
-   PAY PERIODS
+   INPUT COMPONENTS
 ========================================================= */
 
-function frequencyDays(frequency) {
-  switch (frequency) {
-    case "weekly":
-      return 7;
-
-    case "biweekly":
-      return 14;
-
-    case "semi_monthly":
-      return 15;
-
-    case "monthly":
-      return 30;
-
-    default:
-      return 14;
-  }
-}
-
-function buildPeriodsForJob(job, year, month) {
-  const frequency =
-    job?.payFrequency ?? "biweekly";
-
-  const configuredStart =
-    job?.payPeriodStart;
-
-  /*
-   * If the user has configured an actual
-   * period start, use it as the anchor.
-   */
-  if (configuredStart) {
-    const anchor =
-      new Date(`${configuredStart}T00:00:00`);
-
-    if (!Number.isNaN(anchor.getTime())) {
-      const target =
-        new Date(year, month, 15);
-
-      let current =
-        new Date(anchor);
-
-      const days =
-        frequencyDays(frequency);
-
-      let guard = 0;
-
-      while (
-        current.getTime() >
-          target.getTime() &&
-        guard < 500
-      ) {
-        current.setDate(
-          current.getDate() - days
-        );
-        guard++;
-      }
-
-      guard = 0;
-
-      while (guard < 500) {
-        const start =
-          dateString(current);
-
-        const endDate =
-          new Date(current);
-
-        endDate.setDate(
-          endDate.getDate() + days - 1
-        );
-
-        const end =
-          dateString(endDate);
-
-        if (
-          end >=
-          `${year}-${String(month + 1).padStart(2, "0")}-01`
-        ) {
-          const payday =
-            job.payday ||
-            addDays(end, 5);
-
-          return [
-            {
-              id: `${job.id}|${start}|${end}`,
-              k: `${job.id}|${start}|${end}`,
-              start,
-              end,
-              pd: payday,
-              lbl: `${formatDate(start)} – ${formatDate(end)}`,
-            },
-          ];
-        }
-
-        current.setDate(
-          current.getDate() + days
-        );
-
-        guard++;
-      }
-    }
-  }
-
-  /*
-   * Default fallback.
-   *
-   * This preserves the existing Budget Blossom
-   * experience while allowing each job to have
-   * its own schedule later.
-   */
-  const first =
-    new Date(year, month, 1);
-
-  const periods = [];
-
-  let cursor =
-    new Date(first);
-
-  const days =
-    frequencyDays(frequency);
-
-  for (let i = 0; i < 4; i++) {
-    const start =
-      dateString(cursor);
-
-    const endDate =
-      new Date(cursor);
-
-    endDate.setDate(
-      endDate.getDate() + days - 1
-    );
-
-    const end =
-      dateString(endDate);
-
-    periods.push({
-      id: `${job.id}|${start}|${end}`,
-      k: `${job.id}|${start}|${end}`,
-      start,
-      end,
-      pd:
-        job.payday ||
-        addDays(end, 5),
-      lbl:
-        `${formatDate(start)} – ${formatDate(end)}`,
-    });
-
-    cursor.setDate(
-      cursor.getDate() + days
-    );
-  }
-
-  return periods;
-}
-
-/* =========================================================
-   COMPONENT STYLES
-========================================================= */
-
-const cardStyle = {
-  background:
-    "var(--color-bg-card, #ffffff)",
-  border:
-    "1px solid var(--color-border, #f0dce4)",
-  borderRadius:
-    "var(--radius-lg, 16px)",
-  boxShadow:
-    "var(--shadow-card, 0 2px 16px rgba(200,80,100,.07))",
-  padding: 16,
-  marginBottom: 14,
-};
-
-const inputStyle = {
-  width: "100%",
-  minHeight: 42,
-  padding: "9px 11px",
-  border:
-    "1px solid var(--color-border, #f0dce4)",
-  borderRadius:
-    "var(--radius-md, 12px)",
-  background: "#fff",
-  color:
-    "var(--color-text, #3a2430)",
-  outline: "none",
-  fontSize: 13,
-};
-
-const labelStyle = {
-  display: "block",
-  marginBottom: 5,
-  fontSize: 10,
-  fontWeight: 800,
-  color:
-    "var(--color-text-soft, #7a5868)",
-  textTransform: "uppercase",
-  letterSpacing: ".05em",
-};
-
-/* =========================================================
-   SMALL COMPONENTS
-========================================================= */
-
-function LoadingSpinner({ message }) {
-  return (
-    <div
-      style={{
-        ...cardStyle,
-        textAlign: "center",
-        padding: 35,
-        color:
-          "var(--color-text-soft)",
-      }}
-    >
-      <div
-        style={{
-          fontSize: 26,
-          marginBottom: 8,
-        }}
-      >
-        ⏳
-      </div>
-
-      {message}
-    </div>
-  );
-}
-
-function Field({
-  label,
+function Label({
   children,
 }) {
   return (
-    <div>
-      <label style={labelStyle}>
-        {label}
-      </label>
-      {children}
-    </div>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  small,
-}) {
-  return (
-    <div
+    <label
       style={{
-        background: "#fff",
-        border:
-          "1px solid var(--color-border)",
-        borderRadius:
-          "var(--radius-md)",
-        padding: 12,
-        minWidth: 0,
+        display: "block",
+        fontSize: 10,
+        fontWeight: 700,
+        color:
+          "var(--color-text-soft, #9b6b8a)",
+        textTransform:
+          "uppercase",
+        letterSpacing:
+          "0.07em",
+        marginBottom: 5,
       }}
     >
-      <div
-        style={{
-          fontSize: 9,
-          fontWeight: 800,
-          color:
-            "var(--color-text-soft)",
-          textTransform:
-            "uppercase",
-          letterSpacing: ".06em",
-        }}
-      >
-        {label}
-      </div>
-
-      <div
-        style={{
-          marginTop: 4,
-          fontSize:
-            small ? 13 : 18,
-          fontWeight: 800,
-          color:
-            "var(--color-text)",
-        }}
-      >
-        {value}
-      </div>
-    </div>
+      {children}
+    </label>
   );
 }
 
-/* =========================================================
-   PAY PERIOD NAVIGATION
-========================================================= */
+const inputStyle = {
+  width: "100%",
+  padding:
+    "10px 11px",
+  border:
+    "1px solid var(--color-border, #f1d8e2)",
+  borderRadius:
+    "10px",
+  background:
+    "var(--color-bg-card, #fff)",
+  color:
+    "var(--color-text, #3a2430)",
+  fontSize: 13,
+  outline: "none",
+  boxSizing:
+    "border-box",
+};
 
-function PeriodNav({
-  periods,
-  selected,
-  onChange,
+function Button({
+  children,
+  onClick,
+  secondary = false,
+  danger = false,
+  disabled = false,
 }) {
   return (
-    <div style={cardStyle}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent:
-            "space-between",
-          alignItems: "center",
-          marginBottom: 10,
-        }}
-      >
-        <div>
-          <div
-            style={{
-              fontSize: 10,
-              fontWeight: 800,
-              color:
-                "var(--color-text-soft)",
-              textTransform:
-                "uppercase",
-              letterSpacing: ".08em",
-            }}
-          >
-            Pay Period
-          </div>
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        border:
+          secondary
+            ? "1px solid var(--color-border, #efd5df)"
+            : "none",
 
-          <div
-            style={{
-              marginTop: 3,
-              fontSize: 15,
-              fontWeight: 800,
-            }}
-          >
-            {selected?.lbl ??
-              "No pay period"}
-          </div>
-        </div>
+        background:
+          danger
+            ? "#fff0f3"
+            : secondary
+            ? "#fff"
+            : "var(--primary, #db2777)",
 
-        <div
-          style={{
-            textAlign: "right",
-            fontSize: 11,
-            color:
-              "var(--color-text-soft)",
-          }}
-        >
-          Payday
-          <br />
-          <strong>
-            {selected
-              ? formatDate(selected.pd)
-              : "—"}
-          </strong>
-        </div>
-      </div>
+        color:
+          danger
+            ? "#c94d6a"
+            : secondary
+            ? "var(--color-text-soft, #8f6a7c)"
+            : "#fff",
 
-      <select
-        value={
-          selected?.k ?? ""
-        }
-        onChange={e => {
-          const next =
-            periods.find(
-              item =>
-                item.k ===
-                e.target.value
-            );
+        padding:
+          "10px 13px",
 
-          if (next) {
-            onChange(next);
-          }
-        }}
-        style={inputStyle}
-      >
-        {periods.map(period => (
-          <option
-            key={period.k}
-            value={period.k}
-          >
-            {period.lbl} — Payday{" "}
-            {formatDate(period.pd)}
-          </option>
-        ))}
-      </select>
-    </div>
+        borderRadius:
+          "10px",
+
+        fontSize: 12,
+        fontWeight: 700,
+        cursor:
+          disabled
+            ? "not-allowed"
+            : "pointer",
+
+        opacity:
+          disabled
+            ? 0.5
+            : 1,
+      }}
+    >
+      {children}
+    </button>
   );
 }
 
 /* =========================================================
-   JOB SETTINGS
+   JOB EDITOR
 ========================================================= */
 
-function JobSettings({
+function JobEditor({
   job,
   onSave,
+  onClose,
 }) {
-  const [open, setOpen] =
-    useState(false);
+  const existing =
+    job ?? {
+      id: makeId(
+        "job"
+      ),
+      person: "Zai",
+      title: "",
+      employer: "",
+      rate: 0,
+      otRate: 0,
+      overtimeThreshold: 44,
+      overtimeMultiplier: 1.5,
+      vacationPercent: 0,
+      deductionPercent: 15,
+      ded: 15,
+      statMultiplier: 1.5,
+      freezingPremium: 0,
+      eveningPremium: 0,
+      payFrequency: "biweekly",
+      payPeriodStart: "",
+      payPeriodEnd: "",
+      payday: "",
+      breakMinutes: 30,
+      province: "Ontario",
+      active: true,
+    };
 
-  const [form, setForm] =
-    useState({
-      rate:
-        job.rate ?? "",
-      otRate:
-        job.otRate ?? "",
-      overtimeThreshold:
-        job.overtimeThreshold ?? 44,
-      overtimeMultiplier:
-        job.overtimeMultiplier ?? 1.5,
-      vacationPercent:
-        job.vacationPercent ?? 0,
-      deductionPercent:
-        job.deductionPercent ??
-        job.ded ??
-        15,
-      statMultiplier:
-        job.statMultiplier ?? 1.5,
-      payFrequency:
-        job.payFrequency ??
-        "biweekly",
-      payPeriodStart:
-        job.payPeriodStart ?? "",
-      payday:
-        job.payday ?? "",
-    });
+  const [
+    form,
+    setForm,
+  ] = useState({
+    ...existing,
+  });
 
-  function update(field, value) {
-    setForm(current => ({
-      ...current,
-      [field]: value,
-    }));
+  function update(
+    key,
+    value
+  ) {
+    setForm(
+      current => ({
+        ...current,
+        [key]:
+          value,
+      })
+    );
   }
 
-  function saveSettings() {
-    onSave({
-      ...job,
+  function saveJob() {
+    const rate =
+      numberOrZero(
+        form.rate
+      );
 
-      rate:
-        numberOrZero(form.rate),
+    const otMultiplier =
+      numberOrZero(
+        form.overtimeMultiplier
+      ) || 1.5;
+
+    onSave({
+      ...form,
+
+      rate,
 
       otRate:
-        numberOrZero(form.otRate),
+        numberOrZero(
+          form.otRate
+        ) ||
+        rate *
+          otMultiplier,
 
       overtimeThreshold:
         numberOrZero(
           form.overtimeThreshold
-        ),
+        ) || 44,
 
       overtimeMultiplier:
-        numberOrZero(
-          form.overtimeMultiplier
-        ) || 1.5,
+        otMultiplier,
 
       vacationPercent:
         numberOrZero(
@@ -800,132 +951,257 @@ function JobSettings({
 
       deductionPercent:
         numberOrZero(
-          form.deductionPercent
+          form.deductionPercent ??
+            form.ded
         ),
 
       ded:
         numberOrZero(
-          form.deductionPercent
+          form.deductionPercent ??
+            form.ded
         ),
 
       statMultiplier:
         numberOrZero(
           form.statMultiplier
-        ) || 1.5,
+        ) || 1,
 
-      payFrequency:
-        form.payFrequency,
+      freezingPremium:
+        numberOrZero(
+          form.freezingPremium
+        ),
 
-      payPeriodStart:
-        form.payPeriodStart,
+      eveningPremium:
+        numberOrZero(
+          form.eveningPremium
+        ),
 
-      payday:
-        form.payday,
+      breakMinutes:
+        numberOrZero(
+          form.breakMinutes
+        ),
     });
-
-    setOpen(false);
   }
 
   return (
     <div
       style={{
-        marginTop: 10,
+        position:
+          "fixed",
+        inset: 0,
+        background:
+          "rgba(40,20,30,.35)",
+        zIndex: 1000,
+        display:
+          "flex",
+        alignItems:
+          "flex-end",
+        justifyContent:
+          "center",
+        padding: 10,
       }}
     >
-      <button
-        type="button"
-        onClick={() =>
-          setOpen(value => !value)
-        }
+      <div
         style={{
-          width: "100%",
-          padding: 10,
-          border:
-            "1px solid var(--color-border)",
+          width:
+            "min(680px, 100%)",
+          maxHeight:
+            "92vh",
+          overflowY:
+            "auto",
+          background:
+            "#fff",
           borderRadius:
-            "var(--radius-md)",
-          background: "#fff",
-          color:
-            "var(--color-text-soft)",
-          fontWeight: 800,
-          cursor: "pointer",
+            "18px",
+          padding:
+            "18px",
+          boxShadow:
+            "0 20px 60px rgba(40,20,30,.2)",
         }}
       >
-        ⚙ Employer & Payroll Settings{" "}
-        {open ? "▲" : "▼"}
-      </button>
-
-      {open && (
         <div
           style={{
-            marginTop: 10,
-            padding: 12,
-            borderRadius:
-              "var(--radius-md)",
-            background:
-              "var(--color-bg-warm, #fff8fa)",
-            border:
-              "1px solid var(--color-border-soft)",
+            display:
+              "flex",
+            justifyContent:
+              "space-between",
+            alignItems:
+              "center",
+            marginBottom:
+              16,
           }}
         >
+          <div>
+            <div
+              style={{
+                fontSize: 10,
+                fontWeight: 800,
+                color: "#9b6b8a",
+                letterSpacing:
+                  ".1em",
+                textTransform:
+                  "uppercase",
+              }}
+            >
+              Job / Employer
+            </div>
+
+            <h2
+              style={{
+                margin:
+                  "3px 0 0",
+                fontSize:
+                  21,
+              }}
+            >
+              {job
+                ? "Edit Job"
+                : "Add New Job"}
+            </h2>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              border: "none",
+              background:
+                "transparent",
+              fontSize:
+                22,
+              cursor:
+                "pointer",
+            }}
+          >
+            ×
+          </button>
+        </div>
+
+        {/* PERSON */}
+
+        <div
+          style={{
+            display:
+              "grid",
+            gap: 12,
+          }}
+        >
+          <div>
+            <Label>
+              Person
+            </Label>
+
+            <select
+              value={
+                form.person
+              }
+              onChange={e =>
+                update(
+                  "person",
+                  e.target.value
+                )
+              }
+              style={
+                inputStyle
+              }
+            >
+              <option>
+                Zai
+              </option>
+
+              <option>
+                Ariel
+              </option>
+            </select>
+          </div>
+
+          <div>
+            <Label>
+              Employer
+            </Label>
+
+            <input
+              value={
+                form.employer
+              }
+              onChange={e =>
+                update(
+                  "employer",
+                  e.target.value
+                )
+              }
+              placeholder="Employer"
+              style={
+                inputStyle
+              }
+            />
+          </div>
+
+          <div>
+            <Label>
+              Job Title
+            </Label>
+
+            <input
+              value={
+                form.title
+              }
+              onChange={e =>
+                update(
+                  "title",
+                  e.target.value
+                )
+              }
+              placeholder="Job title"
+              style={
+                inputStyle
+              }
+            />
+          </div>
+
+          {/* PAY */}
+
           <div
             style={{
-              display: "grid",
+              display:
+                "grid",
               gridTemplateColumns:
-                "repeat(auto-fit,minmax(140px,1fr))",
+                "1fr 1fr",
               gap: 10,
             }}
           >
-            <Field label="Hourly Rate">
+            <div>
+              <Label>
+                Hourly Rate
+              </Label>
+
               <input
-                style={inputStyle}
                 type="number"
+                min="0"
                 step="0.01"
-                value={form.rate}
+                value={
+                  form.rate
+                }
                 onChange={e =>
                   update(
                     "rate",
                     e.target.value
                   )
                 }
-              />
-            </Field>
-
-            <Field label="OT Rate">
-              <input
-                style={inputStyle}
-                type="number"
-                step="0.01"
-                value={form.otRate}
-                onChange={e =>
-                  update(
-                    "otRate",
-                    e.target.value
-                  )
+                style={
+                  inputStyle
                 }
               />
-            </Field>
+            </div>
 
-            <Field label="OT Threshold">
-              <input
-                style={inputStyle}
-                type="number"
-                value={
-                  form.overtimeThreshold
-                }
-                onChange={e =>
-                  update(
-                    "overtimeThreshold",
-                    e.target.value
-                  )
-                }
-              />
-            </Field>
+            <div>
+              <Label>
+                OT Multiplier
+              </Label>
 
-            <Field label="OT Multiplier">
               <input
-                style={inputStyle}
                 type="number"
+                min="1"
                 step="0.1"
                 value={
                   form.overtimeMultiplier
@@ -936,12 +1212,193 @@ function JobSettings({
                     e.target.value
                   )
                 }
+                style={
+                  inputStyle
+                }
               />
-            </Field>
+            </div>
+          </div>
 
-            <Field label="Stat Multiplier">
-              <select
-                style={inputStyle}
+          <div
+            style={{
+              display:
+                "grid",
+              gridTemplateColumns:
+                "1fr 1fr",
+              gap: 10,
+            }}
+          >
+            <div>
+              <Label>
+                OT Threshold (hours)
+              </Label>
+
+              <input
+                type="number"
+                min="0"
+                value={
+                  form.overtimeThreshold
+                }
+                onChange={e =>
+                  update(
+                    "overtimeThreshold",
+                    e.target.value
+                  )
+                }
+                style={
+                  inputStyle
+                }
+              />
+            </div>
+
+            <div>
+              <Label>
+                Default Break (minutes)
+              </Label>
+
+              <input
+                type="number"
+                min="0"
+                value={
+                  form.breakMinutes
+                }
+                onChange={e =>
+                  update(
+                    "breakMinutes",
+                    e.target.value
+                  )
+                }
+                style={
+                  inputStyle
+                }
+              />
+            </div>
+          </div>
+
+          {/* PREMIUMS */}
+
+          <div
+            style={{
+              padding:
+                "13px",
+              background:
+                "#fff7fa",
+              border:
+                "1px solid #f7dce7",
+              borderRadius:
+                12,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 800,
+                color:
+                  "#9b6b8a",
+                textTransform:
+                  "uppercase",
+                letterSpacing:
+                  ".07em",
+                marginBottom:
+                  10,
+              }}
+            >
+              Hourly Premiums
+            </div>
+
+            <div
+              style={{
+                display:
+                  "grid",
+                gridTemplateColumns:
+                  "1fr 1fr",
+                gap: 10,
+              }}
+            >
+              <div>
+                <Label>
+                  Freezing / Cold Premium ($/hr)
+                </Label>
+
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={
+                    form.freezingPremium
+                  }
+                  onChange={e =>
+                    update(
+                      "freezingPremium",
+                      e.target.value
+                    )
+                  }
+                  style={
+                    inputStyle
+                  }
+                />
+              </div>
+
+              <div>
+                <Label>
+                  Evening Premium ($/hr)
+                </Label>
+
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={
+                    form.eveningPremium
+                  }
+                  onChange={e =>
+                    update(
+                      "eveningPremium",
+                      e.target.value
+                    )
+                  }
+                  style={
+                    inputStyle
+                  }
+                />
+              </div>
+            </div>
+
+            <p
+              style={{
+                margin:
+                  "8px 0 0",
+                fontSize:
+                  10,
+                color:
+                  "#9b6b8a",
+              }}
+            >
+              Example: $1.50/hr freezing premium ×
+              8 paid hours = $12.00.
+            </p>
+          </div>
+
+          {/* STAT */}
+
+          <div
+            style={{
+              display:
+                "grid",
+              gridTemplateColumns:
+                "1fr 1fr",
+              gap: 10,
+            }}
+          >
+            <div>
+              <Label>
+                Stat Holiday Multiplier
+              </Label>
+
+              <input
+                type="number"
+                min="0"
+                step="0.1"
                 value={
                   form.statMultiplier
                 }
@@ -951,24 +1408,21 @@ function JobSettings({
                     e.target.value
                   )
                 }
-              >
-                <option value="1">
-                  1×
-                </option>
-                <option value="1.5">
-                  1.5×
-                </option>
-                <option value="2">
-                  2×
-                </option>
-              </select>
-            </Field>
+                style={
+                  inputStyle
+                }
+              />
+            </div>
 
-            <Field label="Vacation Pay %">
+            <div>
+              <Label>
+                Vacation Pay %
+              </Label>
+
               <input
-                style={inputStyle}
                 type="number"
-                step="0.1"
+                min="0"
+                step="0.01"
                 value={
                   form.vacationPercent
                 }
@@ -978,29 +1432,91 @@ function JobSettings({
                     e.target.value
                   )
                 }
-              />
-            </Field>
-
-            <Field label="Est. Deductions %">
-              <input
-                style={inputStyle}
-                type="number"
-                step="0.1"
-                value={
-                  form.deductionPercent
-                }
-                onChange={e =>
-                  update(
-                    "deductionPercent",
-                    e.target.value
-                  )
+                style={
+                  inputStyle
                 }
               />
-            </Field>
+            </div>
+          </div>
 
-            <Field label="Pay Frequency">
+          {/* DEDUCTIONS */}
+
+          <div>
+            <Label>
+              Estimated Deduction %
+            </Label>
+
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={
+                form.deductionPercent
+              }
+              onChange={e =>
+                update(
+                  "deductionPercent",
+                  e.target.value
+                )
+              }
+              style={
+                inputStyle
+              }
+            />
+          </div>
+
+          {/* PAY SCHEDULE */}
+
+          <div
+            style={{
+              padding:
+                "14px",
+              background:
+                "#fffaf1",
+              border:
+                "1px solid #f2dfb5",
+              borderRadius:
+                12,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 800,
+                color:
+                  "#98701f",
+                textTransform:
+                  "uppercase",
+                letterSpacing:
+                  ".07em",
+                marginBottom:
+                  5,
+              }}
+            >
+              Pay Schedule
+            </div>
+
+            <p
+              style={{
+                margin:
+                  "0 0 12px",
+                fontSize:
+                  10,
+                color:
+                  "#8f7650",
+              }}
+            >
+              Pay period and payday are entered separately.
+              The payday is NOT automatically assumed to be
+              the end of the pay period.
+            </p>
+
+            <div>
+              <Label>
+                Pay Frequency
+              </Label>
+
               <select
-                style={inputStyle}
                 value={
                   form.payFrequency
                 }
@@ -1009,6 +1525,9 @@ function JobSettings({
                     "payFrequency",
                     e.target.value
                   )
+                }
+                style={
+                  inputStyle
                 }
               >
                 <option value="weekly">
@@ -1019,7 +1538,7 @@ function JobSettings({
                   Biweekly
                 </option>
 
-                <option value="semi_monthly">
+                <option value="semi-monthly">
                   Semi-monthly
                 </option>
 
@@ -1027,354 +1546,364 @@ function JobSettings({
                   Monthly
                 </option>
               </select>
-            </Field>
+            </div>
 
-            <Field label="Pay Period Anchor">
+            <div
+              style={{
+                display:
+                  "grid",
+                gridTemplateColumns:
+                  "1fr 1fr",
+                gap: 10,
+                marginTop:
+                  10,
+              }}
+            >
+              <div>
+                <Label>
+                  Pay Period Start
+                </Label>
+
+                <input
+                  type="date"
+                  value={
+                    form.payPeriodStart
+                  }
+                  onChange={e =>
+                    update(
+                      "payPeriodStart",
+                      e.target.value
+                    )
+                  }
+                  style={
+                    inputStyle
+                  }
+                />
+              </div>
+
+              <div>
+                <Label>
+                  Pay Period End
+                </Label>
+
+                <input
+                  type="date"
+                  value={
+                    form.payPeriodEnd
+                  }
+                  onChange={e =>
+                    update(
+                      "payPeriodEnd",
+                      e.target.value
+                    )
+                  }
+                  style={
+                    inputStyle
+                  }
+                />
+              </div>
+            </div>
+
+            <div
+              style={{
+                marginTop:
+                  10,
+              }}
+            >
+              <Label>
+                Actual Payday
+              </Label>
+
               <input
-                style={inputStyle}
                 type="date"
                 value={
-                  form.payPeriodStart
+                  form.payday
                 }
-                onChange={e =>
-                  update(
-                    "payPeriodStart",
-                    e.target.value
-                  )
-                }
-              />
-            </Field>
-
-            <Field label="Typical Payday">
-              <input
-                style={inputStyle}
-                type="date"
-                value={form.payday}
                 onChange={e =>
                   update(
                     "payday",
                     e.target.value
                   )
                 }
+                style={
+                  inputStyle
+                }
               />
-            </Field>
-          </div>
+            </div>
 
-          <button
-            type="button"
-            onClick={saveSettings}
+            {form.payPeriodStart &&
+              form.payPeriodEnd &&
+              form.payday && (
+                <div
+                  style={{
+                    marginTop:
+                      12,
+                    padding:
+                      "10px",
+                    background:
+                      "#fff",
+                    borderRadius:
+                      9,
+                    fontSize:
+                      11,
+                  }}
+                >
+                  <strong>
+                    Example:
+                  </strong>{" "}
+                  Work from{" "}
+                  {formatDate(
+                    form.payPeriodStart
+                  )}{" "}
+                  to{" "}
+                  {formatDate(
+                    form.payPeriodEnd
+                  )}
+                  {" → "}
+                  paid on{" "}
+                  {formatDate(
+                    form.payday
+                  )}
+                </div>
+              )}
+          </div>
+        </div>
+
+        <div
+          style={{
+            display:
+              "flex",
+            gap: 8,
+            marginTop:
+              16,
+          }}
+        >
+          <Button
+            secondary
+            onClick={
+              onClose
+            }
+          >
+            Cancel
+          </Button>
+
+          <div
             style={{
-              width: "100%",
-              marginTop: 12,
-              padding: 11,
-              border: "none",
-              borderRadius:
-                "var(--radius-md)",
-              background:
-                "var(--primary, #e8708a)",
-              color: "#fff",
-              fontWeight: 800,
-              cursor: "pointer",
+              flex: 1,
             }}
           >
-            Save Payroll Settings
-          </button>
+            <Button
+              onClick={
+                saveJob
+              }
+            >
+              Save Job
+            </Button>
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
 
 /* =========================================================
-   JOB CARD
+   WORK SHIFT FORM
 ========================================================= */
 
-function JobCard({
+function ShiftForm({
   job,
-  shifts,
-  period,
-  onAddShift,
-  onRemoveShift,
-  onSendEstimated,
-  onSendActual,
-  onUpdateJob,
-  onRemoveJob,
+  onAdd,
 }) {
-  const [date, setDate] =
-    useState(dateString());
+  const [
+    date,
+    setDate,
+  ] = useState(
+    dateString()
+  );
 
-  const [startTime, setStartTime] =
-    useState("09:00");
+  const [
+    startTime,
+    setStartTime,
+  ] = useState(
+    "09:00"
+  );
 
-  const [endTime, setEndTime] =
-    useState("17:00");
+  const [
+    endTime,
+    setEndTime,
+  ] = useState(
+    "17:00"
+  );
 
-  const [breakMinutes, setBreakMinutes] =
-    useState("30");
+  const [
+    breakMinutes,
+    setBreakMinutes,
+  ] = useState(
+    String(
+      job?.breakMinutes ??
+        30
+    )
+  );
 
-  const [payType, setPayType] =
-    useState("regular");
+  const [
+    rate,
+    setRate,
+  ] = useState(
+    String(
+      job?.rate ??
+        0
+    )
+  );
 
-  const [freezingPremium, setFreezingPremium] =
-    useState("");
+  const [
+    freezingPremium,
+    setFreezingPremium,
+  ] = useState(
+    String(
+      job?.freezingPremium ??
+        0
+    )
+  );
 
-  const [eveningPremium, setEveningPremium] =
-    useState("");
+  const [
+    eveningPremium,
+    setEveningPremium,
+  ] = useState(
+    String(
+      job?.eveningPremium ??
+        0
+    )
+  );
 
-  const [trainingHours, setTrainingHours] =
-    useState("");
+  const [
+    trainingHours,
+    setTrainingHours,
+  ] = useState(
+    "0"
+  );
 
-  const [bonus, setBonus] =
-    useState("");
+  const [
+    bonus,
+    setBonus,
+  ] = useState(
+    "0"
+  );
 
-  const [otherEarnings, setOtherEarnings] =
-    useState("");
+  const [
+    otherEarnings,
+    setOtherEarnings,
+  ] = useState(
+    "0"
+  );
 
-  const [notes, setNotes] =
-    useState("");
+  const [
+    notes,
+    setNotes,
+  ] = useState(
+    ""
+  );
 
-  const [actualNet, setActualNet] =
-    useState("");
+  const [
+    statOverride,
+    setStatOverride,
+  ] = useState(
+    "auto"
+  );
 
-  const [actualGross, setActualGross] =
-    useState("");
+  const [
+    statMultiplier,
+    setStatMultiplier,
+  ] = useState(
+    String(
+      job?.statMultiplier ??
+        1.5
+    )
+  );
 
   const holiday =
-    holidayDate(date);
+    getHoliday(
+      date
+    );
 
-  /*
-   * Determine the treatment configured by
-   * the employer/job.
-   */
-  const statMultiplier =
-    payType === "stat_2x"
-      ? 2
-      : payType === "stat_1x"
-      ? 1
-      : payType === "stat_1_5x"
-      ? 1.5
-      : numberOrZero(
-          job.statMultiplier
-        ) || 1.5;
-
-  const isStatHoliday =
-    payType === "stat_1x" ||
-    payType === "stat_1_5x" ||
-    payType === "stat_2x";
-
-  const shiftPreview =
+  const paidHours =
     calculateShift({
       date,
-
       startTime,
-
       endTime,
-
       unpaidBreakMinutes:
         numberOrZero(
           breakMinutes
         ),
-
       hourlyRate:
-        numberOrZero(job.rate),
-
-      overtimeThreshold:
         numberOrZero(
-          job.overtimeThreshold
-        ) || 44,
-
-      overtimeMultiplier:
+          rate
+        ),
+      isStatHoliday:
+        statOverride ===
+        "yes" ||
+        (
+          statOverride ===
+            "auto" &&
+          Boolean(
+            holiday
+          )
+        ),
+      statMultiplier:
         numberOrZero(
-          job.overtimeMultiplier
-        ) || 1.5,
-
-      isStatHoliday,
-
-      statMultiplier,
-
+          statMultiplier
+        ),
       freezingPremium:
         numberOrZero(
           freezingPremium
         ),
-
       eveningPremium:
         numberOrZero(
           eveningPremium
         ),
-
       trainingHours:
         numberOrZero(
           trainingHours
         ),
-
       bonus:
-        numberOrZero(bonus),
-
+        numberOrZero(
+          bonus
+        ),
       otherEarnings:
         numberOrZero(
           otherEarnings
         ),
     });
 
-  /*
-   * Convert legacy stored shifts into the
-   * new calculator format.
-   */
-  const calculatorShifts =
-    shifts.map(shift => ({
-      ...shift,
-
-      startTime:
-        shift.startTime ??
-        shift.inT ??
-        "",
-
-      endTime:
-        shift.endTime ??
-        shift.outT ??
-        "",
-
-      unpaidBreakMinutes:
-        shift.unpaidBreakMinutes ??
-        shift.brk ??
-        0,
-
-      hourlyRate:
-        shift.hourlyRate ??
-        shift.rate ??
-        job.rate,
-
-      overtimeThreshold:
-        shift.overtimeThreshold ??
-        job.overtimeThreshold ??
-        44,
-
-      overtimeMultiplier:
-        shift.overtimeMultiplier ??
-        job.overtimeMultiplier ??
-        1.5,
-
-     isStatHoliday:
-  shift.isStatHoliday ??
-  (
-    (
-      shift.type === "stat" ||
-      shift.type === "stat_1x" ||
-      shift.type === "stat_1_5x" ||
-      shift.type === "stat_2x"
-    ) ||
-    Boolean(shift.hol)
-  ),
-
-      statMultiplier:
-        shift.statMultiplier ??
-        job.statMultiplier ??
-        1.5,
-
-      freezingPremium:
-        shift.freezingPremium ??
-        0,
-
-      eveningPremium:
-        shift.eveningPremium ??
-        0,
-
-      trainingHours:
-        shift.trainingHours ??
-        0,
-
-      bonus:
-        shift.bonus ??
-        0,
-
-      otherEarnings:
-        shift.otherEarnings ??
-        0,
-    }));
-
-  const payroll =
-    calculatorShifts.length
-      ? calculatePaycheck(
-          calculatorShifts,
-          {
-            vacationPercent:
-              numberOrZero(
-                job.vacationPercent
-              ),
-
-            overtimeThreshold:
-              numberOrZero(
-                job.overtimeThreshold
-              ) || 44,
-
-            overtimeMultiplier:
-              numberOrZero(
-                job.overtimeMultiplier
-              ) || 1.5,
-          }
-        )
-      : null;
-
-  /*
-   * The payroll engine supports individual
-   * deductions. For the current app we use
-   * the employer-configured estimated
-   * deduction percentage.
-   *
-   * Clearly labeled as ESTIMATED.
-   */
-  const estimatedGross =
-    payroll?.grossPay ?? 0;
-
-  const estimatedDeductions =
-    estimatedGross *
-    (
-      numberOrZero(
-        job.deductionPercent ??
-          job.ded ??
-          0
-      ) / 100
-    );
-
-  const estimatedNet =
-    Math.max(
-      0,
-      estimatedGross -
-        estimatedDeductions
-    );
-
-  const totalHours =
-    payroll
-      ? numberOrZero(
-          payroll.regularHours
-        ) +
-        numberOrZero(
-          payroll.overtimeHours
-        ) +
-        numberOrZero(
-          payroll.statHours
-        )
-      : 0;
-
-  function addShift() {
-    if (!date) {
-      alert("Please select a work date.");
+  function submit() {
+    if (
+      !date ||
+      !startTime ||
+      !endTime
+    ) {
       return;
     }
 
-    if (!startTime || !endTime) {
-      alert(
-        "Please enter the start and end time."
+    const isStatHoliday =
+      statOverride ===
+        "yes" ||
+      (
+        statOverride ===
+          "auto" &&
+        Boolean(
+          holiday
+        )
       );
-      return;
-    }
 
     const shift = {
-      id: crypto.randomUUID(),
+      id:
+        makeId(
+          "shift"
+        ),
 
       date,
 
       startTime,
+
       endTime,
 
       unpaidBreakMinutes:
@@ -1383,21 +1912,32 @@ function JobCard({
         ),
 
       hourlyRate:
-        numberOrZero(job.rate),
+        numberOrZero(
+          rate
+        ),
 
       overtimeThreshold:
         numberOrZero(
-          job.overtimeThreshold
-        ) || 44,
+          job?.overtimeThreshold ??
+            44
+        ),
 
       overtimeMultiplier:
         numberOrZero(
-          job.overtimeMultiplier
-        ) || 1.5,
+          job?.overtimeMultiplier ??
+            1.5
+        ),
 
       isStatHoliday,
 
-      statMultiplier,
+      holidayName:
+        holiday?.name ??
+        "",
+
+      statMultiplier:
+        numberOrZero(
+          statMultiplier
+        ),
 
       freezingPremium:
         numberOrZero(
@@ -1415,7 +1955,9 @@ function JobCard({
         ),
 
       bonus:
-        numberOrZero(bonus),
+        numberOrZero(
+          bonus
+        ),
 
       otherEarnings:
         numberOrZero(
@@ -1423,1626 +1965,532 @@ function JobCard({
         ),
 
       notes,
-
-      /*
-       * Legacy fields preserved so existing
-       * Budget Blossom data remains usable.
-       */
-      inT: startTime,
-      outT: endTime,
-      brk:
-        numberOrZero(
-          breakMinutes
-        ),
-      type: payType,
-      rate:
-        numberOrZero(job.rate),
-      hol:
-        holiday?.name ?? null,
-
-      hrs:
-        shiftPreview.hours,
-
-      gross:
-        shiftPreview.grossPay,
-
-      regularHours:
-        shiftPreview.regularHours,
-
-      overtimeHours:
-        shiftPreview.overtimeHours,
-
-      statHours:
-        shiftPreview.statHours,
-
-      premiumHours:
-        shiftPreview.hours &&
-        (
-          numberOrZero(
-            freezingPremium
-          ) > 0 ||
-          numberOrZero(
-            eveningPremium
-          ) > 0
-        )
-          ? shiftPreview.hours
-          : 0,
-
-      trainingHoursCalculated:
-        shiftPreview.trainingHours,
     };
 
-    onAddShift(
-      job.id,
+    onAdd(
       shift
     );
-
-    setStartTime("09:00");
-    setEndTime("17:00");
-    setBreakMinutes("30");
-    setPayType("regular");
-    setFreezingPremium("");
-    setEveningPremium("");
-    setTrainingHours("");
-    setBonus("");
-    setOtherEarnings("");
-    setNotes("");
-  }
-
-  function saveActual() {
-    const net =
-      numberOrZero(actualNet);
-
-    if (net <= 0) {
-      alert(
-        "Please enter the actual net paycheck."
-      );
-      return;
-    }
-
-    const gross =
-      numberOrZero(
-        actualGross
-      ) || net;
-
-    onSendActual(
-      job.id,
-      net,
-      gross,
-      estimatedNet
-    );
-
-    setActualNet("");
-    setActualGross("");
-  }
-
-  const payTypeOptions = [
-    {
-      value: "regular",
-      label:
-        `Regular — ${money(job.rate)}/hr`,
-    },
-
-    {
-      value: "overtime",
-      label:
-        `Overtime — ${money(
-          job.otRate ??
-            job.rate * 1.5
-        )}/hr`,
-    },
-
-    {
-      value: "stat_1x",
-      label:
-        "Stat Holiday — 1×",
-    },
-
-    {
-      value: "stat_1_5x",
-      label:
-        "Stat Holiday — 1.5×",
-    },
-
-    {
-      value: "stat_2x",
-      label:
-        "Stat Holiday — 2×",
-    },
-  ];
-
-  return (
-    <div style={cardStyle}>
-      {/* JOB HEADER */}
-
-      <div
-        style={{
-          display: "flex",
-          justifyContent:
-            "space-between",
-          alignItems: "flex-start",
-          gap: 10,
-          marginBottom: 14,
-        }}
-      >
-        <div>
-          <div
-            style={{
-              fontSize: 10,
-              fontWeight: 800,
-              color:
-                "var(--color-text-soft)",
-              textTransform:
-                "uppercase",
-              letterSpacing: ".08em",
-            }}
-          >
-            {job.person}
-          </div>
-
-          <h2
-            style={{
-              margin: "3px 0 0",
-              fontFamily:
-                "var(--font-display, Georgia, serif)",
-              fontSize: 20,
-            }}
-          >
-            {job.title}
-          </h2>
-
-          <div
-            style={{
-              marginTop: 3,
-              fontSize: 11,
-              color:
-                "var(--color-text-soft)",
-            }}
-          >
-            {job.employer} ·{" "}
-            {money(job.rate)}/hr
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={() =>
-            onRemoveJob(job.id)
-          }
-          style={{
-            border: "none",
-            background: "transparent",
-            color:
-              "var(--color-text-muted)",
-            cursor: "pointer",
-            fontSize: 16,
-          }}
-          title="Remove job"
-        >
-          ✕
-        </button>
-      </div>
-
-      {/* PAY PERIOD */}
-
-      <div
-        style={{
-          background:
-            "var(--color-bg-warm, #fff8fa)",
-          border:
-            "1px solid var(--color-border-soft)",
-          borderRadius:
-            "var(--radius-md)",
-          padding: 10,
-          marginBottom: 12,
-          fontSize: 11,
-        }}
-      >
-        <strong>
-          Pay Period
-        </strong>
-
-        <div
-          style={{
-            marginTop: 3,
-            color:
-              "var(--color-text-soft)",
-          }}
-        >
-          {period?.lbl ??
-            "No period"}
-        </div>
-
-        <div
-          style={{
-            marginTop: 2,
-            color:
-              "var(--color-text-soft)",
-          }}
-        >
-          Payday:{" "}
-          <strong>
-            {formatDate(
-              period?.pd
-            )}
-          </strong>
-        </div>
-      </div>
-
-      {/* WORK HOURS */}
-
-      <div
-        style={{
-          fontSize: 11,
-          fontWeight: 800,
-          color:
-            "var(--color-text-soft)",
-          textTransform:
-            "uppercase",
-          letterSpacing: ".08em",
-          marginBottom: 9,
-        }}
-      >
-        Work Hours
-      </div>
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns:
-            "repeat(auto-fit,minmax(130px,1fr))",
-          gap: 10,
-        }}
-      >
-        <Field label="Date">
-          <input
-            style={inputStyle}
-            type="date"
-            value={date}
-            onChange={e =>
-              setDate(e.target.value)
-            }
-          />
-        </Field>
-
-        <Field label="Start">
-          <input
-            style={inputStyle}
-            type="time"
-            value={startTime}
-            onChange={e =>
-              setStartTime(
-                e.target.value
-              )
-            }
-          />
-        </Field>
-
-        <Field label="End">
-          <input
-            style={inputStyle}
-            type="time"
-            value={endTime}
-            onChange={e =>
-              setEndTime(
-                e.target.value
-              )
-            }
-          />
-        </Field>
-
-        <Field label="Break (minutes)">
-          <input
-            style={inputStyle}
-            type="number"
-            min="0"
-            value={breakMinutes}
-            onChange={e =>
-              setBreakMinutes(
-                e.target.value
-              )
-            }
-          />
-        </Field>
-      </div>
-
-      {/* PAY TYPE */}
-
-      <div style={{ marginTop: 10 }}>
-        <Field label="Pay Type">
-          <select
-            style={inputStyle}
-            value={payType}
-            onChange={e =>
-              setPayType(
-                e.target.value
-              )
-            }
-          >
-            {payTypeOptions.map(
-              option => (
-                <option
-                  key={option.value}
-                  value={option.value}
-                >
-                  {option.label}
-                </option>
-              )
-            )}
-          </select>
-        </Field>
-      </div>
-
-      {/* HOLIDAY NOTICE */}
-
-      {holiday && (
-        <div
-          style={{
-            marginTop: 10,
-            padding: 10,
-            borderRadius:
-              "var(--radius-md)",
-            background:
-              "#fff8e7",
-            border:
-              "1px solid #f0d89a",
-            color: "#7c5c16",
-            fontSize: 11,
-          }}
-        >
-          🎉 <strong>{holiday.name}</strong>{" "}
-          is recognized on this date.
-          <br />
-          <span
-            style={{
-              opacity: 0.8,
-            }}
-          >
-            The actual holiday entitlement
-            depends on your employer and
-            applicable employment rules.
-            Budget Blossom uses your configured
-            employer treatment.
-          </span>
-        </div>
-      )}
-
-      {/* PREMIUMS */}
-
-      <div
-        style={{
-          marginTop: 14,
-          fontSize: 11,
-          fontWeight: 800,
-          color:
-            "var(--color-text-soft)",
-          textTransform:
-            "uppercase",
-          letterSpacing: ".08em",
-          marginBottom: 9,
-        }}
-      >
-        Additional Earnings
-      </div>
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns:
-            "repeat(auto-fit,minmax(140px,1fr))",
-          gap: 10,
-        }}
-      >
-        <Field label="Freezing Premium">
-          <input
-            style={inputStyle}
-            type="number"
-            step="0.01"
-            placeholder="0.00"
-            value={freezingPremium}
-            onChange={e =>
-              setFreezingPremium(
-                e.target.value
-              )
-            }
-          />
-        </Field>
-
-        <Field label="Evening Premium">
-          <input
-            style={inputStyle}
-            type="number"
-            step="0.01"
-            placeholder="0.00"
-            value={eveningPremium}
-            onChange={e =>
-              setEveningPremium(
-                e.target.value
-              )
-            }
-          />
-        </Field>
-
-        <Field label="Training Hours">
-          <input
-            style={inputStyle}
-            type="number"
-            step="0.25"
-            placeholder="0"
-            value={trainingHours}
-            onChange={e =>
-              setTrainingHours(
-                e.target.value
-              )
-            }
-          />
-        </Field>
-
-        <Field label="Bonus">
-          <input
-            style={inputStyle}
-            type="number"
-            step="0.01"
-            placeholder="0.00"
-            value={bonus}
-            onChange={e =>
-              setBonus(
-                e.target.value
-              )
-            }
-          />
-        </Field>
-
-        <Field label="Other Earnings">
-          <input
-            style={inputStyle}
-            type="number"
-            step="0.01"
-            placeholder="0.00"
-            value={otherEarnings}
-            onChange={e =>
-              setOtherEarnings(
-                e.target.value
-              )
-            }
-          />
-        </Field>
-
-        <Field label="Notes">
-          <input
-            style={inputStyle}
-            placeholder="Optional"
-            value={notes}
-            onChange={e =>
-              setNotes(
-                e.target.value
-              )
-            }
-          />
-        </Field>
-      </div>
-
-      {/* LIVE SHIFT PREVIEW */}
-
-      <div
-        style={{
-          marginTop: 12,
-          padding: 12,
-          borderRadius:
-            "var(--radius-md)",
-          background:
-            "var(--color-bg-warm, #fff8fa)",
-          border:
-            "1px solid var(--color-border-soft)",
-        }}
-      >
-        <div
-          style={{
-            fontSize: 10,
-            fontWeight: 800,
-            textTransform:
-              "uppercase",
-            color:
-              "var(--color-text-soft)",
-            letterSpacing: ".06em",
-            marginBottom: 8,
-          }}
-        >
-          Shift Preview
-        </div>
-
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns:
-              "repeat(3,1fr)",
-            gap: 7,
-          }}
-        >
-          <StatCard
-            label="Hours"
-            value={`${shiftPreview.hours.toFixed(
-              2
-            )} hrs`}
-            small
-          />
-
-          <StatCard
-            label="Pay"
-            value={money(
-              shiftPreview.grossPay
-            )}
-            small
-          />
-
-          <StatCard
-            label="Type"
-            value={
-              isStatHoliday
-                ? `${statMultiplier}×`
-                : payType ===
-                  "overtime"
-                ? "OT"
-                : "Regular"
-            }
-            small
-          />
-        </div>
-      </div>
-
-      <button
-        type="button"
-        onClick={addShift}
-        style={{
-          width: "100%",
-          marginTop: 12,
-          padding: 12,
-          border: "none",
-          borderRadius:
-            "var(--radius-md)",
-          background:
-            "var(--primary, #e8708a)",
-          color: "#fff",
-          fontWeight: 800,
-          cursor: "pointer",
-        }}
-      >
-        + Add Work Hours
-      </button>
-
-      {/* SAVED SHIFTS */}
-
-      <div
-        style={{
-          marginTop: 16,
-          fontSize: 11,
-          fontWeight: 800,
-          color:
-            "var(--color-text-soft)",
-          textTransform:
-            "uppercase",
-          letterSpacing: ".08em",
-          marginBottom: 8,
-        }}
-      >
-        Work Logged
-      </div>
-
-      {shifts.length === 0 ? (
-        <div
-          style={{
-            padding: 12,
-            background: "#fff",
-            border:
-              "1px dashed var(--color-border)",
-            borderRadius:
-              "var(--radius-md)",
-            fontSize: 11,
-            color:
-              "var(--color-text-soft)",
-          }}
-        >
-          No work hours logged for this
-          pay period yet.
-        </div>
-      ) : (
-        shifts.map(shift => (
-          <div
-            key={shift.id}
-            style={{
-              display: "flex",
-              alignItems:
-                "flex-start",
-              gap: 10,
-              padding: 11,
-              marginBottom: 7,
-              borderRadius:
-                "var(--radius-md)",
-              background:
-                "#fff8fa",
-              border:
-                "1px solid var(--color-border-soft)",
-            }}
-          >
-            <div
-              style={{
-                flex: 1,
-              }}
-            >
-              <div
-                style={{
-                  fontWeight: 800,
-                  fontSize: 12,
-                }}
-              >
-                {formatDate(
-                  shift.date
-                )}
-
-                {shift.hol && (
-                  <span
-                    style={{
-                      marginLeft: 5,
-                      color: "#a67c20",
-                      fontSize: 10,
-                    }}
-                  >
-                    🎉 {shift.hol}
-                  </span>
-                )}
-              </div>
-
-              <div
-                style={{
-                  marginTop: 3,
-                  fontSize: 10,
-                  color:
-                    "var(--color-text-soft)",
-                }}
-              >
-                {shift.startTime ??
-                  shift.inT}
-                {" – "}
-                {shift.endTime ??
-                  shift.outT}
-                {" · "}
-                {numberOrZero(
-                  shift.hrs
-                ).toFixed(2)}
-                {" hrs"}
-              </div>
-
-              <div
-                style={{
-                  marginTop: 2,
-                  fontSize: 10,
-                  color:
-                    "var(--color-text-soft)",
-                }}
-              >
-                {shift.type ??
-                  "regular"}
-                {" · "}
-                {money(
-                  shift.hourlyRate ??
-                    shift.rate ??
-                    job.rate
-                )}
-                /hr
-              </div>
-
-              {shift.notes && (
-                <div
-                  style={{
-                    marginTop: 3,
-                    fontSize: 10,
-                    color:
-                      "var(--color-text-muted)",
-                  }}
-                >
-                  {shift.notes}
-                </div>
-              )}
-            </div>
-
-            <strong
-              style={{
-                color: "#3a6b4e",
-                fontSize: 12,
-                whiteSpace:
-                  "nowrap",
-              }}
-            >
-              {money(
-                shift.gross ?? 0
-              )}
-            </strong>
-
-            <button
-              type="button"
-              onClick={() =>
-                onRemoveShift(
-                  job.id,
-                  shift.id
-                )
-              }
-              style={{
-                border: "none",
-                background:
-                  "transparent",
-                color:
-                  "var(--color-text-muted)",
-                cursor: "pointer",
-              }}
-            >
-              ✕
-            </button>
-          </div>
-        ))
-      )}
-
-      {/* PAYROLL SUMMARY */}
-
-      <div
-        style={{
-          marginTop: 14,
-          padding: 13,
-          borderRadius:
-            "var(--radius-md)",
-          background:
-            "var(--color-bg-warm)",
-          border:
-            "1px solid var(--color-border-soft)",
-        }}
-      >
-        <div
-          style={{
-            fontSize: 10,
-            fontWeight: 800,
-            color:
-              "var(--color-text-soft)",
-            textTransform:
-              "uppercase",
-            letterSpacing: ".08em",
-            marginBottom: 9,
-          }}
-        >
-          Paystub-Style Estimate
-        </div>
-
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns:
-              "repeat(2,1fr)",
-            gap: 7,
-          }}
-        >
-          <StatCard
-            label="Regular"
-            value={`${numberOrZero(
-              payroll?.regularHours
-            ).toFixed(2)} hrs`}
-            small
-          />
-
-          <StatCard
-            label="Overtime"
-            value={`${numberOrZero(
-              payroll?.overtimeHours
-            ).toFixed(2)} hrs`}
-            small
-          />
-
-          <StatCard
-            label="Holiday"
-            value={`${numberOrZero(
-              payroll?.statHours
-            ).toFixed(2)} hrs`}
-            small
-          />
-
-          <StatCard
-            label="Premium"
-            value={money(
-              payroll?.premiumPay ??
-                0
-            )}
-            small
-          />
-
-          <StatCard
-            label="Training"
-            value={money(
-              payroll?.trainingPay ??
-                0
-            )}
-            small
-          />
-
-          <StatCard
-            label="Vacation"
-            value={money(
-              payroll?.vacationPay ??
-                0
-            )}
-            small
-          />
-        </div>
-
-        <div
-          style={{
-            marginTop: 10,
-            paddingTop: 10,
-            borderTop:
-              "1px solid var(--color-border)",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent:
-                "space-between",
-              marginBottom: 5,
-              fontSize: 12,
-            }}
-          >
-            <span>
-              Total Hours
-            </span>
-
-            <strong>
-              {totalHours.toFixed(2)}
-            </strong>
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              justifyContent:
-                "space-between",
-              marginBottom: 5,
-              fontSize: 12,
-            }}
-          >
-            <span>
-              Gross Pay
-            </span>
-
-            <strong>
-              {money(
-                estimatedGross
-              )}
-            </strong>
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              justifyContent:
-                "space-between",
-              marginBottom: 5,
-              fontSize: 12,
-              color:
-                "var(--color-text-soft)",
-            }}
-          >
-            <span>
-              Estimated Deductions
-            </span>
-
-            <strong>
-              -{money(
-                estimatedDeductions
-              )}
-            </strong>
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              justifyContent:
-                "space-between",
-              marginTop: 8,
-              paddingTop: 8,
-              borderTop:
-                "1px solid var(--color-border)",
-              fontSize: 16,
-            }}
-          >
-            <strong>
-              Estimated Net Pay
-            </strong>
-
-            <strong
-              style={{
-                color:
-                  "var(--primary, #e8708a)",
-              }}
-            >
-              {money(
-                estimatedNet
-              )}
-            </strong>
-          </div>
-
-          <div
-            style={{
-              marginTop: 7,
-              fontSize: 9,
-              color:
-                "var(--color-text-muted)",
-            }}
-          >
-            ESTIMATED — actual Canadian
-            payroll deductions can vary.
-          </div>
-        </div>
-      </div>
-
-      {/* SEND ESTIMATE */}
-
-      <button
-        type="button"
-        disabled={!shifts.length}
-        onClick={() =>
-          onSendEstimated(
-            job.id
-          )
-        }
-        style={{
-          width: "100%",
-          marginTop: 12,
-          padding: 12,
-          border: "none",
-          borderRadius:
-            "var(--radius-md)",
-          background:
-            shifts.length
-              ? "#3a6b4e"
-              : "#d4b8c4",
-          color: "#fff",
-          fontWeight: 800,
-          cursor:
-            shifts.length
-              ? "pointer"
-              : "not-allowed",
-        }}
-      >
-        ✓ Send Estimated Pay to Budget Pool
-      </button>
-
-      {/* ACTUAL PAYCHECK */}
-
-      <div
-        style={{
-          marginTop: 16,
-          paddingTop: 14,
-          borderTop:
-            "1px solid var(--color-border)",
-        }}
-      >
-        <div
-          style={{
-            fontSize: 10,
-            fontWeight: 800,
-            color:
-              "var(--color-text-soft)",
-            textTransform:
-              "uppercase",
-            letterSpacing: ".08em",
-            marginBottom: 8,
-          }}
-        >
-          Actual Paycheck
-        </div>
-
-        <div
-          style={{
-            background: "#f8fbff",
-            border:
-              "1px solid #d7e6f5",
-            borderRadius:
-              "var(--radius-md)",
-            padding: 11,
-            marginBottom: 10,
-            fontSize: 11,
-            color: "#2860a0",
-          }}
-        >
-          Estimated Net:{" "}
-          <strong>
-            {money(
-              estimatedNet
-            )}
-          </strong>
-
-          <br />
-
-          Enter the actual amount after
-          your paycheck arrives. The
-          estimate will remain saved.
-        </div>
-
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns:
-              "repeat(2,1fr)",
-            gap: 10,
-          }}
-        >
-          <Field label="Actual Net Pay">
-            <input
-              style={inputStyle}
-              type="number"
-              step="0.01"
-              placeholder="0.00"
-              value={actualNet}
-              onChange={e =>
-                setActualNet(
-                  e.target.value
-                )
-              }
-            />
-          </Field>
-
-          <Field label="Actual Gross">
-            <input
-              style={inputStyle}
-              type="number"
-              step="0.01"
-              placeholder="Optional"
-              value={actualGross}
-              onChange={e =>
-                setActualGross(
-                  e.target.value
-                )
-              }
-            />
-          </Field>
-        </div>
-
-        <button
-          type="button"
-          onClick={saveActual}
-          style={{
-            width: "100%",
-            marginTop: 10,
-            padding: 11,
-            borderRadius:
-              "var(--radius-md)",
-            background:
-              "#eaf1f9",
-            border:
-              "1px solid #9cc0e4",
-            color: "#2860a0",
-            fontWeight: 800,
-            cursor: "pointer",
-          }}
-        >
-          ✓ Save Actual Paycheck
-        </button>
-      </div>
-
-      {/* EMPLOYER SETTINGS */}
-
-      <JobSettings
-        job={job}
-        onSave={onUpdateJob}
-      />
-    </div>
-  );
-}
-
-/* =========================================================
-   POOLED INCOME
-========================================================= */
-
-function PooledIncomeCard({
-  entries,
-  total,
-  period,
-  onRemove,
-}) {
-  return (
-    <div style={cardStyle}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent:
-            "space-between",
-          alignItems: "center",
-          marginBottom: 12,
-        }}
-      >
-        <div>
-          <div
-            style={{
-              fontSize: 10,
-              fontWeight: 800,
-              color:
-                "var(--color-text-soft)",
-              textTransform:
-                "uppercase",
-              letterSpacing: ".08em",
-            }}
-          >
-            Paycheck Pool
-          </div>
-
-          <div
-            style={{
-              fontFamily:
-                "var(--font-display, Georgia, serif)",
-              fontSize: 18,
-              fontWeight: 700,
-              marginTop: 2,
-            }}
-          >
-            {period?.lbl}
-          </div>
-        </div>
-
-        <strong
-          style={{
-            color: "#3a6b4e",
-            fontSize: 18,
-          }}
-        >
-          {money(total)}
-        </strong>
-      </div>
-
-      {entries.length === 0 ? (
-        <div
-          style={{
-            padding: 12,
-            border:
-              "1px dashed var(--color-border)",
-            borderRadius:
-              "var(--radius-md)",
-            fontSize: 11,
-            color:
-              "var(--color-text-soft)",
-          }}
-        >
-          No paycheck has been added to
-          the Budget Pool yet.
-        </div>
-      ) : (
-        <>
-          {entries.map(
-            (entry, index) => (
-              <div
-                key={
-                  `${entry.date}-${index}`
-                }
-                style={{
-                  display: "flex",
-                  alignItems:
-                    "center",
-                  gap: 8,
-                  padding:
-                    "9px 0",
-                  borderBottom:
-                    "1px solid var(--color-border-soft)",
-                }}
-              >
-                <div
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 800,
-                    }}
-                  >
-                    {entry.src}
-                  </div>
-
-                  <div
-                    style={{
-                      marginTop: 2,
-                      fontSize: 9,
-                      color:
-                        "var(--color-text-soft)",
-                    }}
-                  >
-                    {entry.isActual
-                      ? "ACTUAL PAY"
-                      : "ESTIMATED PAY"}
-                  </div>
-
-                  {entry.estimatedNet !=
-                    null &&
-                    entry.isActual && (
-                      <div
-                        style={{
-                          fontSize: 9,
-                          color:
-                            "var(--color-text-soft)",
-                        }}
-                      >
-                        Estimated:{" "}
-                        {money(
-                          entry.estimatedNet
-                        )}
-                        {" · "}
-                        Difference:{" "}
-                        {money(
-                          entry.actualDifference
-                        )}
-                      </div>
-                    )}
-                </div>
-
-                <strong
-                  style={{
-                    color: "#3a6b4e",
-                    whiteSpace:
-                      "nowrap",
-                  }}
-                >
-                  {money(
-                    entry.amt
-                  )}
-                </strong>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    onRemove(index)
-                  }
-                  style={{
-                    border: "none",
-                    background:
-                      "transparent",
-                    color:
-                      "var(--color-text-muted)",
-                    cursor:
-                      "pointer",
-                  }}
-                >
-                  ✕
-                </button>
-              </div>
-            )
-          )}
-
-          <div
-            style={{
-              display: "flex",
-              justifyContent:
-                "space-between",
-              paddingTop: 11,
-              fontWeight: 800,
-            }}
-          >
-            <span>
-              Total Pool
-            </span>
-
-            <span
-              style={{
-                color: "#3a6b4e",
-              }}
-            >
-              {money(total)}
-            </span>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-/* =========================================================
-   ADD JOB MODAL
-========================================================= */
-
-function AddJobModal({
-  open,
-  onClose,
-  onAdd,
-}) {
-  const [person, setPerson] =
-    useState("Zai");
-
-  const [title, setTitle] =
-    useState("");
-
-  const [employer, setEmployer] =
-    useState("");
-
-  const [rate, setRate] =
-    useState("");
-
-  const [otRate, setOtRate] =
-    useState("");
-
-  const [frequency, setFrequency] =
-    useState("biweekly");
-
-  if (!open) return null;
-
-  function add() {
-    if (!title.trim()) {
-      alert("Enter a job title.");
-      return;
-    }
-
-    if (!employer.trim()) {
-      alert("Enter the employer.");
-      return;
-    }
-
-    const hourly =
-      numberOrZero(rate);
-
-    if (hourly <= 0) {
-      alert("Enter a valid hourly rate.");
-      return;
-    }
-
-    const job = {
-      id: crypto.randomUUID(),
-
-      person,
-
-      title:
-        title.trim(),
-
-      employer:
-        employer.trim(),
-
-      rate: hourly,
-
-      otRate:
-        numberOrZero(
-          otRate
-        ) ||
-        hourly * 1.5,
-
-      overtimeThreshold: 44,
-
-      overtimeMultiplier: 1.5,
-
-      vacationPercent: 0,
-
-      deductionPercent: 15,
-
-      ded: 15,
-
-      statMultiplier: 1.5,
-
-      payFrequency:
-        frequency,
-
-      payPeriodStart: "",
-
-      payday: "",
-
-      color: 0,
-    };
-
-    onAdd(job);
-
-    setPerson("Zai");
-    setTitle("");
-    setEmployer("");
-    setRate("");
-    setOtRate("");
-    setFrequency("biweekly");
-
-    onClose();
   }
 
   return (
     <div
       style={{
-        position: "fixed",
-        inset: 0,
         background:
-          "rgba(30,15,25,.45)",
-        zIndex: 1000,
-        display: "flex",
-        alignItems:
-          "center",
-        justifyContent:
-          "center",
-        padding: 18,
-      }}
-      onMouseDown={e => {
-        if (
-          e.target === e.currentTarget
-        ) {
-          onClose();
-        }
+          "#fff",
+        border:
+          "1px solid #f0dbe4",
+        borderRadius:
+          14,
+        padding:
+          14,
+        marginTop:
+          10,
       }}
     >
       <div
         style={{
-          width: "100%",
-          maxWidth: 500,
-          maxHeight:
-            "90vh",
-          overflowY: "auto",
-          background: "#fff",
-          borderRadius:
-            "var(--radius-xl)",
-          padding: 18,
-          boxShadow:
-            "var(--shadow-lg)",
+          fontSize:
+            11,
+          fontWeight:
+            800,
+          color:
+            "#9b6b8a",
+          textTransform:
+            "uppercase",
+          letterSpacing:
+            ".07em",
+          marginBottom:
+            12,
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            justifyContent:
-              "space-between",
-            alignItems: "center",
-            marginBottom: 14,
-          }}
-        >
-          <h2
-            style={{
-              margin: 0,
-              fontFamily:
-                "var(--font-display, Georgia, serif)",
-            }}
-          >
-            Add Job / Employer
-          </h2>
+        Add Work Hours
+      </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              border: "none",
-              background:
-                "transparent",
-              fontSize: 20,
-              cursor: "pointer",
-            }}
-          >
-            ✕
-          </button>
+      <div
+        style={{
+          display:
+            "grid",
+          gap: 10,
+        }}
+      >
+        <div>
+          <Label>
+            Date
+          </Label>
+
+          <input
+            type="date"
+            value={
+              date
+            }
+            onChange={e =>
+              setDate(
+                e.target.value
+              )
+            }
+            style={
+              inputStyle
+            }
+          />
         </div>
 
         <div
           style={{
-            display: "grid",
-            gap: 11,
+            display:
+              "grid",
+            gridTemplateColumns:
+              "1fr 1fr 1fr",
+            gap: 8,
           }}
         >
-          <Field label="Person">
-            <select
-              style={inputStyle}
-              value={person}
+          <div>
+            <Label>
+              Start
+            </Label>
+
+            <input
+              type="time"
+              value={
+                startTime
+              }
               onChange={e =>
-                setPerson(
+                setStartTime(
                   e.target.value
                 )
               }
-            >
-              <option value="Zai">
-                Me — Zai
-              </option>
-
-              <option value="Ariel">
-                Husband — Ariel
-              </option>
-            </select>
-          </Field>
-
-          <Field label="Job Title">
-            <input
-              style={inputStyle}
-              placeholder="e.g. Equipment Operator"
-              value={title}
-              onChange={e =>
-                setTitle(
-                  e.target.value
-                )
+              style={
+                inputStyle
               }
             />
-          </Field>
+          </div>
 
-          <Field label="Employer">
+          <div>
+            <Label>
+              End
+            </Label>
+
             <input
-              style={inputStyle}
-              placeholder="e.g. Witron"
-              value={employer}
+              type="time"
+              value={
+                endTime
+              }
               onChange={e =>
-                setEmployer(
+                setEndTime(
                   e.target.value
                 )
               }
+              style={
+                inputStyle
+              }
             />
-          </Field>
+          </div>
 
-          <Field label="Hourly Rate">
+          <div>
+            <Label>
+              Break
+            </Label>
+
             <input
-              style={inputStyle}
               type="number"
+              min="0"
+              value={
+                breakMinutes
+              }
+              onChange={e =>
+                setBreakMinutes(
+                  e.target.value
+                )
+              }
+              style={
+                inputStyle
+              }
+            />
+          </div>
+        </div>
+
+        <div
+          style={{
+            display:
+              "grid",
+            gridTemplateColumns:
+              "1fr 1fr",
+            gap: 8,
+          }}
+        >
+          <div>
+            <Label>
+              Hourly Rate
+            </Label>
+
+            <input
+              type="number"
+              min="0"
               step="0.01"
-              placeholder="21.00"
-              value={rate}
+              value={
+                rate
+              }
               onChange={e =>
                 setRate(
                   e.target.value
                 )
               }
+              style={
+                inputStyle
+              }
             />
-          </Field>
+          </div>
 
-          <Field label="Overtime Rate">
-            <input
-              style={inputStyle}
-              type="number"
-              step="0.01"
-              placeholder="31.50"
-              value={otRate}
+          <div>
+            <Label>
+              Holiday
+            </Label>
+
+            <select
+              value={
+                statOverride
+              }
               onChange={e =>
-                setOtRate(
+                setStatOverride(
                   e.target.value
                 )
               }
-            />
-          </Field>
-
-          <Field label="Pay Frequency">
-            <select
-              style={inputStyle}
-              value={frequency}
-              onChange={e =>
-                setFrequency(
-                  e.target.value
-                )
+              style={
+                inputStyle
               }
             >
-              <option value="weekly">
-                Weekly
+              <option value="auto">
+                Auto
               </option>
 
-              <option value="biweekly">
-                Biweekly
+              <option value="yes">
+                Stat Holiday
               </option>
 
-              <option value="semi_monthly">
-                Semi-monthly
-              </option>
-
-              <option value="monthly">
-                Monthly
+              <option value="no">
+                Regular Day
               </option>
             </select>
-          </Field>
+          </div>
         </div>
 
-        <button
-          type="button"
-          onClick={add}
+        {holiday && (
+          <div
+            style={{
+              padding:
+                "9px 10px",
+              background:
+                "#fff7e6",
+              border:
+                "1px solid #f3d99b",
+              borderRadius:
+                9,
+              fontSize:
+                11,
+              color:
+                "#8a6b29",
+            }}
+          >
+            🇨🇦 {holiday.name} detected.
+            Employer rules determine the actual
+            statutory treatment.
+          </div>
+        )}
+
+        <div
           style={{
-            width: "100%",
-            marginTop: 15,
-            padding: 12,
-            border: "none",
-            borderRadius:
-              "var(--radius-md)",
-            background:
-              "var(--primary, #e8708a)",
-            color: "#fff",
-            fontWeight: 800,
-            cursor: "pointer",
+            display:
+              "grid",
+            gridTemplateColumns:
+              "1fr 1fr",
+            gap: 8,
           }}
         >
-          Add Employer
-        </button>
+          <div>
+            <Label>
+              Freezing Premium ($/hr)
+            </Label>
+
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={
+                freezingPremium
+              }
+              onChange={e =>
+                setFreezingPremium(
+                  e.target.value
+                )
+              }
+              style={
+                inputStyle
+              }
+            />
+          </div>
+
+          <div>
+            <Label>
+              Evening Premium ($/hr)
+            </Label>
+
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={
+                eveningPremium
+              }
+              onChange={e =>
+                setEveningPremium(
+                  e.target.value
+                )
+              }
+              style={
+                inputStyle
+              }
+            />
+          </div>
+        </div>
+
+        <div
+          style={{
+            display:
+              "grid",
+            gridTemplateColumns:
+              "1fr 1fr",
+            gap: 8,
+          }}
+        >
+          <div>
+            <Label>
+              Stat Multiplier
+            </Label>
+
+            <input
+              type="number"
+              min="0"
+              step="0.1"
+              value={
+                statMultiplier
+              }
+              onChange={e =>
+                setStatMultiplier(
+                  e.target.value
+                )
+              }
+              style={
+                inputStyle
+              }
+            />
+          </div>
+
+          <div>
+            <Label>
+              Training Hours
+            </Label>
+
+            <input
+              type="number"
+              min="0"
+              step="0.25"
+              value={
+                trainingHours
+              }
+              onChange={e =>
+                setTrainingHours(
+                  e.target.value
+                )
+              }
+              style={
+                inputStyle
+              }
+            />
+          </div>
+        </div>
+
+        <div
+          style={{
+            display:
+              "grid",
+            gridTemplateColumns:
+              "1fr 1fr",
+            gap: 8,
+          }}
+        >
+          <div>
+            <Label>
+              Bonus
+            </Label>
+
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={
+                bonus
+              }
+              onChange={e =>
+                setBonus(
+                  e.target.value
+                )
+              }
+              style={
+                inputStyle
+              }
+            />
+          </div>
+
+          <div>
+            <Label>
+              Other Earnings
+            </Label>
+
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={
+                otherEarnings
+              }
+              onChange={e =>
+                setOtherEarnings(
+                  e.target.value
+                )
+              }
+              style={
+                inputStyle
+              }
+            />
+          </div>
+        </div>
+
+        <div>
+          <Label>
+            Notes
+          </Label>
+
+          <input
+            value={
+              notes
+            }
+            onChange={e =>
+              setNotes(
+                e.target.value
+              )
+            }
+            placeholder="Optional"
+            style={
+              inputStyle
+            }
+          />
+        </div>
+
+        {/* PREVIEW */}
+
+        <div
+          style={{
+            background:
+              "#fff7fa",
+            border:
+              "1px solid #f7dce7",
+            borderRadius:
+              11,
+            padding:
+              12,
+          }}
+        >
+          <div
+            style={{
+              fontSize:
+                10,
+              fontWeight:
+                800,
+              color:
+                "#9b6b8a",
+              textTransform:
+                "uppercase",
+              marginBottom:
+                8,
+            }}
+          >
+            Shift Preview
+          </div>
+
+          <div
+            style={{
+              display:
+                "grid",
+              gridTemplateColumns:
+                "1fr 1fr 1fr",
+              gap: 8,
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontSize:
+                    9,
+                  color:
+                    "#9b6b8a",
+                }}
+              >
+                PAID HOURS
+              </div>
+
+              <strong>
+                {paidHours.hours.toFixed(
+                  2
+                )}
+              </strong>
+            </div>
+
+            <div>
+              <div
+                style={{
+                  fontSize:
+                    9,
+                  color:
+                    "#9b6b8a",
+                }}
+              >
+                PREMIUM
+              </div>
+
+              <strong>
+                {money(
+                  paidHours.premiumPay
+                )}
+              </strong>
+            </div>
+
+            <div>
+              <div
+                style={{
+                  fontSize:
+                    9,
+                  color:
+                    "#9b6b8a",
+                }}
+              >
+                SHIFT GROSS
+              </div>
+
+              <strong>
+                {money(
+                  paidHours.grossPay
+                )}
+              </strong>
+            </div>
+          </div>
+        </div>
+
+        <Button
+          onClick={
+            submit
+          }
+        >
+          + Add Work Hours
+        </Button>
       </div>
     </div>
   );
@@ -3053,54 +2501,80 @@ function AddJobModal({
 ========================================================= */
 
 export default function Income() {
-  const [rawData, setRawData] =
-    useState(null);
+  const [
+    rawData,
+    setRawData,
+  ] = useState(null);
 
-  const [loading, setLoading] =
-    useState(true);
+  const [
+    loading,
+    setLoading,
+  ] = useState(true);
 
-  const [saving, setSaving] =
-    useState(false);
+  const [
+    saving,
+    setSaving,
+  ] = useState(false);
 
-  const [error, setError] =
-    useState("");
+  const [
+    error,
+    setError,
+  ] = useState("");
 
-  const [toast, setToast] =
-    useState("");
+  const [
+    toast,
+    setToast,
+  ] = useState("");
 
-  const [addJobOpen, setAddJobOpen] =
-    useState(false);
+  const [
+    jobEditor,
+    setJobEditor,
+  ] = useState(null);
 
-  const [selectedPeriodKey, setSelectedPeriodKey] =
-    useState("");
+  const [
+    selectedJobId,
+    setSelectedJobId,
+  ] = useState("");
 
-  /* -------------------------------------------------------
-     LOAD
-  ------------------------------------------------------- */
+  const [
+    selectedPeriodId,
+    setSelectedPeriodId,
+  ] = useState("");
+
+  /* =======================================================
+     LOAD SUPABASE
+  ======================================================= */
 
   useEffect(() => {
     let dead = false;
 
     async function load() {
-      setLoading(true);
-      setError("");
+      setLoading(
+        true
+      );
 
       try {
         const {
           data: row,
           error: rowError,
-        } = await supabase
-          .from("user_data")
-          .select("data")
-          .limit(1)
-          .single();
+        } =
+          await supabase
+            .from(
+              "user_data"
+            )
+            .select(
+              "data"
+            )
+            .limit(1)
+            .single();
 
         if (rowError) {
           throw rowError;
         }
 
         let data =
-          row?.data ?? {};
+          row?.data ??
+          {};
 
         if (
           typeof data ===
@@ -3108,67 +2582,34 @@ export default function Income() {
         ) {
           try {
             data =
-              JSON.parse(data);
+              JSON.parse(
+                data
+              );
           } catch {
             data = {};
           }
         }
 
-        /*
-         * Older Budget Blossom versions
-         * stored the app inside:
-         *
-         * data.budgetsbloom
-         *
-         * Newer versions store the fields
-         * directly inside data.
-         *
-         * Support both.
-         */
-        if (
-          data?.budgetsbloom
-        ) {
-          let legacy =
-            data.budgetsbloom;
-
-          if (
-            typeof legacy ===
-            "string"
-          ) {
-            try {
-              legacy =
-                JSON.parse(
-                  legacy
-                );
-            } catch {
-              legacy = {};
-            }
-          }
-
-          data = {
-            ...data,
-            ...legacy,
-          };
-        }
-
         if (!dead) {
-          setRawData(data);
+          setRawData(
+            data
+          );
         }
       } catch (err) {
         console.error(
-          "Income load error:",
           err
         );
 
         if (!dead) {
           setError(
-            err?.message ??
-              "Unable to load income data."
+            "Unable to load income data."
           );
         }
       } finally {
         if (!dead) {
-          setLoading(false);
+          setLoading(
+            false
+          );
         }
       }
     }
@@ -3180,98 +2621,160 @@ export default function Income() {
     };
   }, []);
 
-  /* -------------------------------------------------------
+  /* =======================================================
      SAVE
-  ------------------------------------------------------- */
+  ======================================================= */
 
   const save =
     useCallback(
       async updated => {
-        setSaving(true);
+        setSaving(
+          true
+        );
 
         try {
           const {
             data: row,
             error: rowError,
-          } = await supabase
-            .from("user_data")
-            .select("id, data")
-            .limit(1)
-            .single();
+          } =
+            await supabase
+              .from(
+                "user_data"
+              )
+              .select(
+                "id"
+              )
+              .limit(1)
+              .single();
 
           if (rowError) {
             throw rowError;
           }
 
-          let existing =
-            row?.data ?? {};
+          const {
+            error:
+              updateError,
+          } =
+            await supabase
+              .from(
+                "user_data"
+              )
+              .update({
+                data:
+                  updated,
+              })
+              .eq(
+                "id",
+                row.id
+              );
 
           if (
-            typeof existing ===
-            "string"
+            updateError
           ) {
-            try {
-              existing =
-                JSON.parse(
-                  existing
-                );
-            } catch {
-              existing = {};
-            }
-          }
-
-          /*
-           * Preserve all existing data.
-           * Only replace the income-related
-           * fields.
-           */
-          const merged = {
-            ...existing,
-            ...updated,
-          };
-
-          const {
-            error: updateError,
-          } = await supabase
-            .from("user_data")
-            .update({
-              data: merged,
-            })
-            .eq(
-              "id",
-              row.id
-            );
-
-          if (updateError) {
             throw updateError;
           }
 
           setRawData(
-            merged
+            updated
           );
         } catch (err) {
           console.error(
-            "Income save error:",
             err
           );
 
           setToast(
-            "❌ Save failed. Your data was not changed."
+            "❌ Save failed"
           );
         } finally {
-          setSaving(false);
+          setSaving(
+            false
+          );
         }
       },
       []
     );
 
-  /* -------------------------------------------------------
-     DATA
-  ------------------------------------------------------- */
+  /* =======================================================
+     NORMALIZED DATA
+  ======================================================= */
 
   const jobs =
-    rawData?.jobs ??
-    DEFAULT_JOBS;
+    useMemo(() => {
+      const existing =
+        rawData?.jobs;
+
+      if (
+        !Array.isArray(
+          existing
+        ) ||
+        existing.length ===
+          0
+      ) {
+        return DEFAULT_JOBS;
+      }
+
+      /*
+       * Add the new payroll fields without destroying
+       * existing job data.
+       */
+      return existing.map(
+        job => ({
+          ...job,
+
+          payFrequency:
+            job.payFrequency ??
+            "biweekly",
+
+          payPeriodStart:
+            job.payPeriodStart ??
+            "",
+
+          payPeriodEnd:
+            job.payPeriodEnd ??
+            "",
+
+          payday:
+            job.payday ??
+            "",
+
+          breakMinutes:
+            numberOrZero(
+              job.breakMinutes ??
+                30
+            ),
+
+          overtimeMultiplier:
+            numberOrZero(
+              job.overtimeMultiplier ??
+                1.5
+            ) ||
+            1.5,
+
+          freezingPremium:
+            numberOrZero(
+              job.freezingPremium
+            ),
+
+          eveningPremium:
+            numberOrZero(
+              job.eveningPremium
+            ),
+
+          statMultiplier:
+            numberOrZero(
+              job.statMultiplier ??
+                1.5
+            ) ||
+            1.5,
+
+          active:
+            job.active !==
+            false,
+        })
+      );
+    }, [
+      rawData?.jobs,
+    ]);
 
   const shifts =
     rawData?.shifts ??
@@ -3281,124 +2784,496 @@ export default function Income() {
     rawData?.sent ??
     {};
 
-  /*
-   * Build periods for all jobs.
-   */
-  const allPeriods =
-    useMemo(() => {
-      const now =
-        new Date();
+  const actualPaychecks =
+    rawData?.actualPaychecks ??
+    {};
 
-      const result = [];
+  /* =======================================================
+     SELECT DEFAULT JOB
+  ======================================================= */
 
-      jobs.forEach(job => {
-        const periods =
-          buildPeriodsForJob(
-            job,
-            now.getFullYear(),
-            now.getMonth()
-          );
-
-        periods.forEach(period => {
-          result.push({
-            ...period,
-            jobId: job.id,
-            jobName:
-              `${job.person} — ${job.employer}`,
-          });
-        });
-      });
-
-      return result;
-    }, [jobs]);
-
-  /*
-   * Select first period automatically.
-   */
   useEffect(() => {
     if (
-      !selectedPeriodKey &&
-      allPeriods.length
+      !selectedJobId &&
+      jobs.length
     ) {
-      setSelectedPeriodKey(
-        allPeriods[0].k
+      setSelectedJobId(
+        jobs[0].id
       );
     }
   }, [
-    allPeriods,
-    selectedPeriodKey,
+    jobs,
+    selectedJobId,
   ]);
 
-  const selectedPeriod =
-    allPeriods.find(
-      period =>
-        period.k ===
-        selectedPeriodKey
-    ) ??
-    allPeriods[0] ??
-    null;
-
-  /*
-   * Current job for selected period.
-   */
   const selectedJob =
     jobs.find(
       job =>
         job.id ===
-        selectedPeriod?.jobId
+        selectedJobId
     ) ??
     jobs[0] ??
     null;
 
-  const periodKey =
-    selectedPeriod?.k ??
-    "";
+  /* =======================================================
+     PAY PERIODS FOR SELECTED JOB
+  ======================================================= */
 
-  const periodSent =
-    sent[periodKey] ??
-    [];
-
-  const totalPool =
-    periodSent.reduce(
-      (sum, entry) =>
-        sum +
-        numberOrZero(
-          entry.amt
-        ),
-      0
+  const periods =
+    useMemo(
+      () =>
+        selectedJob
+          ? buildPayPeriodsForJob(
+              selectedJob,
+              18
+            )
+          : [],
+      [
+        selectedJob,
+      ]
     );
 
-  /* -------------------------------------------------------
-     SHIFT FUNCTIONS
-  ------------------------------------------------------- */
+  useEffect(() => {
+    if (
+      !selectedPeriodId &&
+      periods.length
+    ) {
+      /*
+       * Prefer the period containing today.
+       */
+      const today =
+        dateString();
 
-  function handleAddShift(
-    jobId,
-    shift
-  ) {
-    /*
-     * The shift is assigned to the
-     * period selected at the time it
-     * is entered.
-     */
-    const jobPeriod =
-      allPeriods.find(
-        period =>
-          period.jobId ===
-            jobId &&
-          shift.date >=
-            period.start &&
-          shift.date <=
-            period.end
+      const current =
+        periods.find(
+          period =>
+            isDateInRange(
+              today,
+              period.start,
+              period.end
+            )
+        );
+
+      setSelectedPeriodId(
+        current?.id ??
+          periods[
+            periods.length -
+              1
+          ].id
+      );
+    }
+  }, [
+    periods,
+    selectedPeriodId,
+  ]);
+
+  const selectedPeriod =
+    periods.find(
+      period =>
+        period.id ===
+        selectedPeriodId
+    ) ??
+    periods.find(
+      period =>
+        selectedJob &&
+        isDateInRange(
+          dateString(),
+          period.start,
+          period.end
+        )
+    ) ??
+    periods[periods.length - 1] ??
+    null;
+
+  /* =======================================================
+     ALL SHIFTS FOR JOB
+  ======================================================= */
+
+  const allJobShifts =
+    useMemo(() => {
+      const output = [];
+
+      Object.entries(
+        shifts
+      ).forEach(
+        ([
+          key,
+          values,
+        ]) => {
+          if (
+            !key.startsWith(
+              `${selectedJobId}|`
+            )
+          ) {
+            return;
+          }
+
+          if (
+            Array.isArray(
+              values
+            )
+          ) {
+            values.forEach(
+              shift => {
+                output.push({
+                  ...shift,
+                  jobId:
+                    selectedJobId,
+                });
+              }
+            );
+          }
+        }
       );
 
-    const targetPeriod =
-      jobPeriod ??
-      selectedPeriod;
+      /*
+       * Also support an older flat structure if it exists.
+       */
+      const flat =
+        shifts[
+          selectedJobId
+        ];
+
+      if (
+        Array.isArray(
+          flat
+        )
+      ) {
+        flat.forEach(
+          shift =>
+            output.push({
+              ...shift,
+              jobId:
+                selectedJobId,
+            })
+        );
+      }
+
+      const unique =
+        new Map();
+
+      output.forEach(
+        shift => {
+          const id =
+            shift.id ??
+            `${shift.date}|${shift.startTime}|${shift.endTime}`;
+
+          unique.set(
+            String(id),
+            shift
+          );
+        }
+      );
+
+      return Array.from(
+        unique.values()
+      ).sort(
+        (a, b) =>
+          String(
+            a.date
+          ).localeCompare(
+            String(
+              b.date
+            )
+          )
+      );
+    }, [
+      shifts,
+      selectedJobId,
+    ]);
+
+  /* =======================================================
+     SHIFTS IN SELECTED PAY PERIOD
+  ======================================================= */
+
+  const periodShifts =
+    useMemo(() => {
+      if (
+        !selectedPeriod
+      ) {
+        return [];
+      }
+
+      return allJobShifts.filter(
+        shift =>
+          isDateInRange(
+            shift.date,
+            selectedPeriod.start,
+            selectedPeriod.end
+          )
+      );
+    }, [
+      allJobShifts,
+      selectedPeriod,
+    ]);
+
+  /* =======================================================
+     PAYROLL
+  ======================================================= */
+
+  const payroll =
+    useMemo(() => {
+      if (
+        !selectedJob ||
+        !selectedPeriod ||
+        !periodShifts.length
+      ) {
+        return null;
+      }
+
+      const calculatorShifts =
+        periodShifts.map(
+          shift => ({
+            ...shift,
+
+            hourlyRate:
+              shift.hourlyRate ??
+              shift.rate ??
+              selectedJob.rate,
+
+            overtimeThreshold:
+              shift.overtimeThreshold ??
+              selectedJob.overtimeThreshold ??
+              44,
+
+            overtimeMultiplier:
+              shift.overtimeMultiplier ??
+              selectedJob.overtimeMultiplier ??
+              1.5,
+
+            statMultiplier:
+              shift.statMultiplier ??
+              selectedJob.statMultiplier ??
+              1.5,
+
+            freezingPremium:
+              shift.freezingPremium ??
+              selectedJob.freezingPremium ??
+              0,
+
+            eveningPremium:
+              shift.eveningPremium ??
+              selectedJob.eveningPremium ??
+              0,
+          })
+        );
+
+      return calculatePaycheck(
+        calculatorShifts,
+        {
+          payPeriodStart:
+            selectedPeriod.start,
+
+          payPeriodEnd:
+            selectedPeriod.end,
+
+          payDate:
+            selectedPeriod.payday,
+
+          vacationPercent:
+            numberOrZero(
+              selectedJob.vacationPercent
+            ),
+
+          overtimeThreshold:
+            numberOrZero(
+              selectedJob.overtimeThreshold ??
+                44
+            ),
+
+          overtimeMultiplier:
+            numberOrZero(
+              selectedJob.overtimeMultiplier ??
+                1.5
+            ),
+        }
+      );
+    }, [
+      selectedJob,
+      selectedPeriod,
+      periodShifts,
+    ]);
+
+  const estimatedGross =
+    payroll?.grossPay ??
+    0;
+
+  const estimatedDeduction =
+    estimateNetPay(
+      estimatedGross,
+      numberOrZero(
+        selectedJob?.deductionPercent ??
+          selectedJob?.ded ??
+          0
+      )
+    );
+
+  const estimatedNet =
+    payroll
+      ? estimatedDeduction
+      : 0;
+
+  const estimatedDeductions =
+    payroll
+      ? estimatedGross -
+        estimatedNet
+      : 0;
+
+  /* =======================================================
+     ACTUAL PAY
+  ======================================================= */
+
+  const actualKey =
+    selectedPeriod &&
+    selectedJob
+      ? `${selectedJob.id}|${selectedPeriod.start}|${selectedPeriod.end}`
+      : "";
+
+  const actual =
+    actualPaychecks[
+      actualKey
+    ] ??
+    null;
+
+  const actualNet =
+    numberOrZero(
+      actual?.netPay ??
+        actual?.actualNet ??
+        actual?.amt
+    );
+
+  const difference =
+    actual
+      ? actualNet -
+        estimatedNet
+      : null;
+
+  /* =======================================================
+     SAVE JOB
+  ======================================================= */
+
+  function handleSaveJob(
+    updatedJob
+  ) {
+    const exists =
+      jobs.some(
+        job =>
+          job.id ===
+          updatedJob.id
+      );
+
+    const updatedJobs =
+      exists
+        ? jobs.map(
+            job =>
+              job.id ===
+              updatedJob.id
+                ? updatedJob
+                : job
+          )
+        : [
+            ...jobs,
+            updatedJob,
+          ];
+
+    save({
+      ...(rawData ?? {}),
+      jobs:
+        updatedJobs,
+    });
+
+    setSelectedJobId(
+      updatedJob.id
+    );
+
+    setJobEditor(
+      null
+    );
+
+    setToast(
+      "✅ Job saved"
+    );
+  }
+
+  /* =======================================================
+     DELETE JOB
+  ======================================================= */
+
+  function handleDeleteJob(
+    jobId
+  ) {
+    if (
+      !window.confirm(
+        "Remove this job? Existing work-hour records will be kept."
+      )
+    ) {
+      return;
+    }
+
+    const updatedJobs =
+      jobs.filter(
+        job =>
+          job.id !==
+          jobId
+      );
+
+    save({
+      ...(rawData ?? {}),
+      jobs:
+        updatedJobs,
+    });
+
+    setSelectedJobId(
+      updatedJobs[0]?.id ??
+        ""
+    );
+
+    setToast(
+      "🗑 Job removed"
+    );
+  }
+
+  /* =======================================================
+     ADD SHIFT
+  ======================================================= */
+
+  function handleAddShift(
+    shift
+  ) {
+    if (
+      !selectedJob
+    ) {
+      return;
+    }
+
+    /*
+     * IMPORTANT:
+     *
+     * We store the shift using the pay period that it
+     * belongs to TODAY, based on its date.
+     *
+     * This means if the user enters Aug 17,
+     * it will NOT be placed inside the Aug 1–14
+     * paycheck.
+     */
+    const period =
+      findPayPeriodForDate(
+        selectedJob,
+        shift.date
+      );
+
+    if (
+      !period
+    ) {
+      setToast(
+        "⚠️ This date does not fall inside a configured pay period. Check the job's pay schedule."
+      );
+
+      return;
+    }
 
     const key =
-      targetPeriod?.k ??
-      `${jobId}|${shift.date}`;
+      `${selectedJob.id}|${period.start}|${period.end}`;
 
     const current =
       shifts[key] ??
@@ -3417,44 +3292,64 @@ export default function Income() {
       },
     });
 
+    /*
+     * Automatically navigate to the paycheck
+     * that owns the shift.
+     */
+    setSelectedPeriodId(
+      period.id
+    );
+
     setToast(
-      "✅ Work hours added!"
+      `✅ Shift added to ${formatDate(
+        period.start
+      )} – ${formatDate(
+        period.end
+      )} paycheck`
     );
   }
 
-  function handleRemoveShift(
-    jobId,
-    shiftId
+  /* =======================================================
+     DELETE SHIFT
+  ======================================================= */
+
+  function handleDeleteShift(
+    shift
   ) {
-    const possibleKeys =
-      Object.keys(shifts).filter(
-        key =>
-          key.startsWith(
-            `${jobId}|`
-          )
+    const period =
+      findPayPeriodForDate(
+        selectedJob,
+        shift.date
       );
 
-    let nextShifts = {
-      ...shifts,
-    };
+    if (
+      !period
+    ) {
+      return;
+    }
 
-    possibleKeys.forEach(key => {
-      nextShifts[key] =
-        (
-          nextShifts[key] ??
-          []
-        ).filter(
-          shift =>
-            shift.id !==
-            shiftId
-        );
-    });
+    const key =
+      `${selectedJob.id}|${period.start}|${period.end}`;
+
+    const current =
+      (
+        shifts[key] ??
+        []
+      ).filter(
+        item =>
+          item.id !==
+          shift.id
+      );
 
     save({
       ...(rawData ?? {}),
 
-      shifts:
-        nextShifts,
+      shifts: {
+        ...shifts,
+
+        [key]:
+          current,
+      },
     });
 
     setToast(
@@ -3462,512 +3357,205 @@ export default function Income() {
     );
   }
 
-  /* -------------------------------------------------------
-     ESTIMATED PAY
-  ------------------------------------------------------- */
+  /* =======================================================
+     SAVE ACTUAL PAY
+  ======================================================= */
 
-  function handleSendEstimated(
-    jobId
+  function handleSaveActualPay(
+    event
   ) {
-    const job =
-      jobs.find(
-        item =>
-          item.id ===
-          jobId
-      );
-
-    if (!job) return;
-
-    /*
-     * Find the actual period
-     * belonging to this job.
-     */
-    const jobPeriod =
-      allPeriods.find(
-        period =>
-          period.k ===
-          periodKey &&
-          period.jobId ===
-            jobId
-      ) ??
-      allPeriods.find(
-        period =>
-          period.jobId ===
-          jobId
-      );
-
-    if (!jobPeriod) {
-      setToast(
-        "❌ No pay period found."
-      );
+    if (
+      !selectedJob ||
+      !selectedPeriod
+    ) {
       return;
     }
 
-    const key =
-      jobPeriod.k;
-
-    const periodShifts =
-      shifts[key] ??
-      [];
-
-    if (!periodShifts.length) {
-      setToast(
-        "Add work hours before sending estimated pay."
-      );
-      return;
-    }
-
-    const calculatorShifts =
-      periodShifts.map(
-        shift => ({
-          ...shift,
-
-          startTime:
-            shift.startTime ??
-            shift.inT,
-
-          endTime:
-            shift.endTime ??
-            shift.outT,
-
-          unpaidBreakMinutes:
-            shift.unpaidBreakMinutes ??
-            shift.brk ??
-            0,
-
-          hourlyRate:
-            shift.hourlyRate ??
-            shift.rate ??
-            job.rate,
-
-          overtimeThreshold:
-            shift.overtimeThreshold ??
-            job.overtimeThreshold ??
-            44,
-
-          overtimeMultiplier:
-            shift.overtimeMultiplier ??
-            job.overtimeMultiplier ??
-            1.5,
-        })
+    const form =
+      new FormData(
+        event.currentTarget
       );
 
-    const paycheck =
-      calculatePaycheck(
-        calculatorShifts,
-        {
-          vacationPercent:
-            numberOrZero(
-              job.vacationPercent
-            ),
-
-          overtimeThreshold:
-            numberOrZero(
-              job.overtimeThreshold
-            ) || 44,
-
-          overtimeMultiplier:
-            numberOrZero(
-              job.overtimeMultiplier
-            ) || 1.5,
-        }
-      );
-
-    const estimatedGross =
+    const netPay =
       numberOrZero(
-        paycheck.grossPay
+        form.get(
+          "actualNet"
+        )
       );
 
-    const deductionRate =
+    const grossPay =
       numberOrZero(
-        job.deductionPercent ??
-          job.ded
-      ) / 100;
-
-    const estimatedDeductions =
-      estimatedGross *
-      deductionRate;
-
-    const estimatedNet =
-      Math.max(
-        0,
-        estimatedGross -
-          estimatedDeductions
+        form.get(
+          "actualGross"
+        )
       );
 
-    const entry = {
-      id: crypto.randomUUID(),
+    const federalTax =
+      numberOrZero(
+        form.get(
+          "federalTax"
+        )
+      );
 
-      src:
-        `${job.person} — ${job.title}`,
+    const cpp =
+      numberOrZero(
+        form.get(
+          "cpp"
+        )
+      );
 
-      amt:
-        Number(
-          estimatedNet.toFixed(2)
-        ),
+    const ei =
+      numberOrZero(
+        form.get(
+          "ei"
+        )
+      );
 
-      gross:
-        Number(
-          estimatedGross.toFixed(2)
-        ),
+    const otherDeductions =
+      numberOrZero(
+        form.get(
+          "otherDeductions"
+        )
+      );
 
-      estimatedGross:
-        Number(
-          estimatedGross.toFixed(2)
-        ),
-
-      estimatedDeductions:
-        Number(
-          estimatedDeductions.toFixed(2)
-        ),
-
-      estimatedNet:
-        Number(
-          estimatedNet.toFixed(2)
-        ),
-
-      date:
-        jobPeriod.pd ||
-        dateString(),
-
-      payDate:
-        jobPeriod.pd,
-
+    const updatedActual = {
       payPeriodStart:
-        jobPeriod.start,
+        selectedPeriod.start,
 
       payPeriodEnd:
-        jobPeriod.end,
+        selectedPeriod.end,
+
+      payday:
+        selectedPeriod.payday,
 
       person:
-        job.person,
+        selectedJob.person,
 
       employer:
-        job.employer,
+        selectedJob.employer,
 
-      isActual:
-        false,
-
-      regularHours:
-        paycheck.regularHours,
-
-      overtimeHours:
-        paycheck.overtimeHours,
-
-      statHours:
-        paycheck.statHours,
-
-      premiumHours:
-        paycheck.premiumHours,
-
-      trainingHours:
-        paycheck.trainingHours,
-
-      vacationPay:
-        paycheck.vacationPay,
-
-      bonus:
-        paycheck.bonus,
-
-      otherEarnings:
-        paycheck.otherEarnings,
-
-      federalTax:
-        paycheck.federalTax,
-
-      cpp:
-        paycheck.cpp,
-
-      ei:
-        paycheck.ei,
-
-      totalDeductions:
-        Number(
-          estimatedDeductions.toFixed(2)
-        ),
-    };
-
-    save({
-      ...(rawData ?? {}),
-
-      sent: {
-        ...sent,
-
-        [key]: [
-          ...(sent[key] ?? []),
-          entry,
-        ],
-      },
-    });
-
-    setToast(
-      `✅ ${money(
-        estimatedNet
-      )} estimated pay saved!`
-    );
-  }
-
-  /* -------------------------------------------------------
-     ACTUAL PAY
-  ------------------------------------------------------- */
-
-  function handleSendActual(
-    jobId,
-    actualNet,
-    actualGross,
-    estimatedNet
-  ) {
-    const job =
-      jobs.find(
-        item =>
-          item.id ===
-          jobId
-      );
-
-    if (!job) return;
-
-    const net =
-      numberOrZero(
-        actualNet
-      );
-
-    const gross =
-      numberOrZero(
-        actualGross
-      ) || net;
-
-    const estimate =
-      numberOrZero(
-        estimatedNet
-      );
-
-    const difference =
-      net - estimate;
-
-    const entry = {
-      id: crypto.randomUUID(),
-
-      src:
-        `${job.person} — ${job.title}`,
-
-      amt:
-        Number(
-          net.toFixed(2)
-        ),
-
-      gross:
-        Number(
-          gross.toFixed(2)
-        ),
-
-      estimatedNet:
-        Number(
-          estimate.toFixed(2)
-        ),
-
-      actualNet:
-        Number(
-          net.toFixed(2)
-        ),
+      jobId:
+        selectedJob.id,
 
       actualGross:
-        Number(
-          gross.toFixed(2)
-        ),
+        grossPay,
 
-      actualDifference:
-        Number(
-          difference.toFixed(2)
-        ),
+      federalTax,
 
-      date:
-        selectedPeriod?.pd ??
-        dateString(),
+      cpp,
 
-      payDate:
-        selectedPeriod?.pd,
+      ei,
 
-      payPeriodStart:
-        selectedPeriod?.start,
+      otherDeductions,
 
-      payPeriodEnd:
-        selectedPeriod?.end,
+      netPay,
 
-      person:
-        job.person,
-
-      employer:
-        job.employer,
-
-      isActual:
-        true,
+      enteredAt:
+        new Date().toISOString(),
     };
 
     save({
       ...(rawData ?? {}),
 
-      sent: {
-        ...sent,
+      actualPaychecks: {
+        ...actualPaychecks,
 
-        [periodKey]: [
-          ...(sent[
-            periodKey
-          ] ?? []),
-          entry,
-        ],
+        [actualKey]:
+          updatedActual,
       },
     });
 
     setToast(
-      `✅ ${money(
-        net
-      )} actual paycheck saved!`
+      "✅ Actual paycheck saved"
     );
   }
 
-  /* -------------------------------------------------------
-     JOB MANAGEMENT
-  ------------------------------------------------------- */
+  /* =======================================================
+     PAY PERIOD DISPLAY
+  ======================================================= */
 
-  function handleAddJob(job) {
-    save({
-      ...(rawData ?? {}),
-
-      jobs: [
-        ...jobs,
-        job,
-      ],
-    });
-
-    setToast(
-      "✅ Employer/job added!"
-    );
-  }
-
-  function handleUpdateJob(
-    updatedJob
-  ) {
-    const updatedJobs =
-      jobs.map(job =>
-        job.id ===
-        updatedJob.id
-          ? updatedJob
-          : job
-      );
-
-    save({
-      ...(rawData ?? {}),
-
-      jobs:
-        updatedJobs,
-    });
-
-    setToast(
-      "✅ Payroll settings updated!"
-    );
-  }
-
-  function handleRemoveJob(
-    jobId
-  ) {
+  function selectPreviousPeriod() {
     if (
-      !window.confirm(
-        "Remove this job? Existing saved payroll records will remain."
-      )
+      !selectedPeriod
     ) {
       return;
     }
 
-    save({
-      ...(rawData ?? {}),
+    const index =
+      periods.findIndex(
+        period =>
+          period.id ===
+          selectedPeriod.id
+      );
 
-      jobs:
-        jobs.filter(
-          job =>
-            job.id !==
-            jobId
-        ),
-    });
-
-    setToast(
-      "🗑 Job removed"
-    );
+    if (
+      index > 0
+    ) {
+      setSelectedPeriodId(
+        periods[
+          index - 1
+        ].id
+      );
+    }
   }
 
-  function handleRemoveSent(
-    index
-  ) {
+  function selectNextPeriod() {
     if (
-      !window.confirm(
-        "Remove this paycheck from the Budget Pool?"
-      )
+      !selectedPeriod
     ) {
       return;
     }
 
-    const updated =
-      (
-        sent[
-          periodKey
-        ] ?? []
-      ).filter(
-        (_, i) =>
-          i !== index
+    const index =
+      periods.findIndex(
+        period =>
+          period.id ===
+          selectedPeriod.id
       );
 
-    save({
-      ...(rawData ?? {}),
-
-      sent: {
-        ...sent,
-
-        [periodKey]:
-          updated,
-      },
-    });
-
-    setToast(
-      "🗑 Paycheck removed"
-    );
+    if (
+      index >= 0 &&
+      index <
+        periods.length - 1
+    ) {
+      setSelectedPeriodId(
+        periods[
+          index + 1
+        ].id
+      );
+    }
   }
 
-  /* -------------------------------------------------------
-     SELECTED PERIOD DATA
-  ------------------------------------------------------- */
+  /* =======================================================
+     LOADING
+  ======================================================= */
 
-  const selectedJobShifts =
-    selectedJob
-      ? shifts[
-          `${selectedJob.id}|${selectedPeriod?.start}|${selectedPeriod?.end}`
-        ] ??
-        shifts[
-          `${selectedJob.id}|${selectedPeriod?.k}`
-        ] ??
-        []
-      : [];
-
-  /*
-   * Because old versions used:
-   *
-   * jobId|periodKey
-   *
-   * and the new period key also uses
-   * that pattern, find the selected
-   * job's exact key.
-   */
-  const selectedShiftKey =
-    selectedJob &&
-    selectedPeriod
-      ? selectedPeriod.k
-      : "";
-
-  const displayShifts =
-    selectedShiftKey &&
-    shifts[selectedShiftKey]
-      ? shifts[
-          selectedShiftKey
-        ]
-      : selectedJobShifts;
+  if (
+    loading
+  ) {
+    return (
+      <div
+        style={{
+          minHeight:
+            "100vh",
+          background:
+            "#fdf6f8",
+          display:
+            "flex",
+          alignItems:
+            "center",
+          justifyContent:
+            "center",
+          color:
+            "#9b6b8a",
+          fontFamily:
+            "'DM Sans', sans-serif",
+        }}
+      >
+        Loading income…
+      </div>
+    );
+  }
 
   /* =======================================================
      RENDER
@@ -3976,50 +3564,61 @@ export default function Income() {
   return (
     <div
       style={{
-        minHeight: "100vh",
+        minHeight:
+          "100vh",
+
         background:
           "var(--color-bg, #fdf6f8)",
+
         color:
           "var(--color-text, #3a2430)",
+
         fontFamily:
           "var(--font-body, 'DM Sans', sans-serif)",
-        paddingBottom: 90,
+
+        paddingBottom:
+          100,
       }}
     >
       <div
         style={{
-          maxWidth: 720,
-          margin: "0 auto",
-          padding: 14,
+          maxWidth:
+            700,
+          margin:
+            "0 auto",
+          padding:
+            14,
         }}
       >
-        {/* HEADER */}
+        {/* =================================================
+            HEADER
+        ================================================= */}
 
         <header
-          className="fade-up"
           style={{
             padding:
               "28px 0 15px",
-            display: "flex",
+            display:
+              "flex",
             justifyContent:
               "space-between",
             alignItems:
               "flex-end",
-            gap: 12,
           }}
         >
           <div>
             <div
               style={{
-                fontSize: 10,
-                fontWeight: 800,
+                fontSize:
+                  10,
+                fontWeight:
+                  800,
                 color:
-                  "var(--color-text-soft)",
+                  "#9b6b8a",
                 letterSpacing:
                   ".12em",
                 textTransform:
                   "uppercase",
-                marginBottom: 4,
               }}
             >
               Salary
@@ -4027,11 +3626,14 @@ export default function Income() {
 
             <h1
               style={{
-                margin: 0,
+                margin:
+                  "4px 0 0",
                 fontFamily:
-                  "var(--font-display, 'Playfair Display', Georgia, serif)",
-                fontSize: 28,
-                lineHeight: 1.1,
+                  "var(--font-display, 'Playfair Display', serif)",
+                fontSize:
+                  28,
+                lineHeight:
+                  1.1,
               }}
             >
               Income & Work Hours
@@ -4040,25 +3642,25 @@ export default function Income() {
             <p
               style={{
                 margin:
-                  "7px 0 0",
-                fontSize: 11,
+                  "6px 0 0",
+                fontSize:
+                  11,
                 color:
-                  "var(--color-text-soft)",
-                lineHeight: 1.5,
+                  "#9b6b8a",
               }}
             >
-              Enter work once. Budget
-              Blossom calculates the
-              paycheck.
+              Enter work once. Budget Blossom assigns
+              it to the correct paycheck.
             </p>
           </div>
 
           {saving && (
             <span
               style={{
-                fontSize: 10,
+                fontSize:
+                  10,
                 color:
-                  "var(--color-text-soft)",
+                  "#9b6b8a",
               }}
             >
               Saving…
@@ -4066,260 +3668,1545 @@ export default function Income() {
           )}
         </header>
 
-        {/* ERROR */}
-
         {error && (
           <div
             style={{
-              background:
-                "var(--color-rose-pale, #fdedf1)",
-              border:
-                "1px solid var(--color-pink-light)",
+              padding:
+                12,
+              marginBottom:
+                12,
               borderRadius:
-                "var(--radius-md)",
-              padding: 13,
-              marginBottom: 12,
+                10,
+              background:
+                "#fff0f2",
               color:
-                "var(--color-pink-deep)",
-              fontSize: 12,
+                "#b63d5b",
+              fontSize:
+                12,
             }}
           >
-            ⚠ {error}
+            {error}
           </div>
         )}
 
-        {loading && (
-          <LoadingSpinner
-            message="Loading income data…"
-          />
-        )}
+        {/* =================================================
+            JOB SELECTOR
+        ================================================= */}
 
-        {!loading &&
-          !error && (
-            <>
-              {/* PERSON / JOB SELECTOR */}
+        <section
+          style={{
+            background:
+              "#fff",
+            border:
+              "1px solid #f0dbe4",
+            borderRadius:
+              14,
+            padding:
+              14,
+            marginBottom:
+              12,
+          }}
+        >
+          <div
+            style={{
+              display:
+                "flex",
+              justifyContent:
+                "space-between",
+              alignItems:
+                "center",
+              marginBottom:
+                8,
+            }}
+          >
+            <div
+              style={{
+                fontSize:
+                  10,
+                fontWeight:
+                  800,
+                color:
+                  "#9b6b8a",
+                textTransform:
+                  "uppercase",
+                letterSpacing:
+                  ".08em",
+              }}
+            >
+              Income Source / Job
+            </div>
 
-              <div style={cardStyle}>
+            <Button
+              secondary
+              onClick={() =>
+                setJobEditor(
+                  "new"
+                )
+              }
+            >
+              + New Job
+            </Button>
+          </div>
+
+          <select
+            value={
+              selectedJobId
+            }
+            onChange={e => {
+              setSelectedJobId(
+                e.target.value
+              );
+
+              setSelectedPeriodId(
+                ""
+              );
+            }}
+            style={{
+              ...inputStyle,
+              fontWeight:
+                700,
+            }}
+          >
+            {jobs.map(
+              job => (
+                <option
+                  key={
+                    job.id
+                  }
+                  value={
+                    job.id
+                  }
+                >
+                  {job.person} —{" "}
+                  {job.employer}{" "}
+                  ·{" "}
+                  {money(
+                    job.rate
+                  )}
+                  /hr
+                </option>
+              )
+            )}
+          </select>
+
+          {selectedJob && (
+            <div
+              style={{
+                marginTop:
+                  10,
+                display:
+                  "flex",
+                gap: 7,
+                flexWrap:
+                  "wrap",
+              }}
+            >
+              <Button
+                secondary
+                onClick={() =>
+                  setJobEditor(
+                    selectedJob
+                  )
+                }
+              >
+                ✏️ Edit Job
+              </Button>
+
+              <Button
+                danger
+                onClick={() =>
+                  handleDeleteJob(
+                    selectedJob.id
+                  )
+                }
+              >
+                Remove Job
+              </Button>
+            </div>
+          )}
+        </section>
+
+        {/* =================================================
+            PAY SCHEDULE
+        ================================================= */}
+
+        {selectedJob && (
+          <section
+            style={{
+              background:
+                "#fffaf1",
+              border:
+                "1px solid #f2dfb5",
+              borderRadius:
+                14,
+              padding:
+                14,
+              marginBottom:
+                12,
+            }}
+          >
+            <div
+              style={{
+                fontSize:
+                  10,
+                fontWeight:
+                  800,
+                color:
+                  "#98701f",
+                textTransform:
+                  "uppercase",
+                letterSpacing:
+                  ".08em",
+              }}
+            >
+              PAY SCHEDULE
+            </div>
+
+            {selectedJob.payPeriodStart &&
+            selectedJob.payPeriodEnd &&
+            selectedJob.payday ? (
+              <>
                 <div
                   style={{
-                    fontSize: 10,
-                    fontWeight: 800,
-                    color:
-                      "var(--color-text-soft)",
-                    textTransform:
-                      "uppercase",
-                    letterSpacing:
-                      ".08em",
-                    marginBottom: 8,
+                    display:
+                      "grid",
+                    gridTemplateColumns:
+                      "1fr 1fr 1fr",
+                    gap: 8,
+                    marginTop:
+                      10,
                   }}
                 >
-                  Income Source
+                  <div
+                    style={{
+                      background:
+                        "#fff",
+                      padding:
+                        10,
+                      borderRadius:
+                        9,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize:
+                          9,
+                        color:
+                          "#9b8050",
+                      }}
+                    >
+                      PAY PERIOD START
+                    </div>
+
+                    <strong
+                      style={{
+                        fontSize:
+                          12,
+                      }}
+                    >
+                      {formatDate(
+                        selectedJob.payPeriodStart
+                      )}
+                    </strong>
+                  </div>
+
+                  <div
+                    style={{
+                      background:
+                        "#fff",
+                      padding:
+                        10,
+                      borderRadius:
+                        9,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize:
+                          9,
+                        color:
+                          "#9b8050",
+                      }}
+                    >
+                      PAY PERIOD END
+                    </div>
+
+                    <strong
+                      style={{
+                        fontSize:
+                          12,
+                      }}
+                    >
+                      {formatDate(
+                        selectedJob.payPeriodEnd
+                      )}
+                    </strong>
+                  </div>
+
+                  <div
+                    style={{
+                      background:
+                        "#fff",
+                      padding:
+                        10,
+                      borderRadius:
+                        9,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize:
+                          9,
+                        color:
+                          "#9b8050",
+                      }}
+                    >
+                      PAYDAY
+                    </div>
+
+                    <strong
+                      style={{
+                        fontSize:
+                          12,
+                        color:
+                          "#d23b75",
+                      }}
+                    >
+                      {formatDate(
+                        selectedJob.payday
+                      )}
+                    </strong>
+                  </div>
                 </div>
 
+                <div
+                  style={{
+                    marginTop:
+                      10,
+                    padding:
+                      "10px 11px",
+                    background:
+                      "#fff",
+                    borderRadius:
+                      9,
+                    fontSize:
+                      11,
+                    color:
+                      "#765f3c",
+                  }}
+                >
+                  💡 The work period and payday are
+                  separate. Work performed during the
+                  period is included in the paycheck,
+                  and the money arrives on the payday.
+                </div>
+              </>
+            ) : (
+              <div
+                style={{
+                  marginTop:
+                    10,
+                  padding:
+                    12,
+                  background:
+                    "#fff",
+                  borderRadius:
+                    9,
+                  fontSize:
+                    11,
+                  color:
+                    "#765f3c",
+                }}
+              >
+                ⚠️ Set this job's pay period and actual
+                payday first. Budget Blossom will not
+                guess the payday.
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* =================================================
+            PAYCHECK NAVIGATION
+        ================================================= */}
+
+        {selectedJob &&
+          periods.length > 0 && (
+            <section
+              style={{
+                background:
+                  "#fff",
+                border:
+                  "1px solid #f0dbe4",
+                borderRadius:
+                  14,
+                padding:
+                  12,
+                marginBottom:
+                  12,
+              }}
+            >
+              <div
+                style={{
+                  display:
+                    "flex",
+                  gap: 8,
+                  alignItems:
+                    "center",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={
+                    selectPreviousPeriod
+                  }
+                  style={{
+                    width:
+                      38,
+                    height:
+                      38,
+                    border:
+                      "1px solid #efdbe4",
+                    borderRadius:
+                      10,
+                    background:
+                      "#fff",
+                    cursor:
+                      "pointer",
+                  }}
+                >
+                  ‹
+                </button>
+
                 <select
-                  style={inputStyle}
                   value={
-                    selectedPeriod?.k ??
+                    selectedPeriod?.id ??
                     ""
                   }
                   onChange={e =>
-                    setSelectedPeriodKey(
+                    setSelectedPeriodId(
                       e.target.value
                     )
                   }
+                  style={{
+                    ...inputStyle,
+                    flex: 1,
+                    textAlign:
+                      "center",
+                    fontWeight:
+                      700,
+                  }}
                 >
-                  {allPeriods.map(
+                  {periods.map(
                     period => (
                       <option
-                        key={period.k}
-                        value={period.k}
+                        key={
+                          period.id
+                        }
+                        value={
+                          period.id
+                        }
                       >
-                        {period.jobName} ·{" "}
-                        {period.lbl} · Payday{" "}
                         {formatDate(
-                          period.pd
+                          period.start
+                        )}{" "}
+                        –{" "}
+                        {formatDate(
+                          period.end
+                        )}{" "}
+                        · Payday{" "}
+                        {formatDate(
+                          period.payday
                         )}
                       </option>
                     )
                   )}
                 </select>
+
+                <button
+                  type="button"
+                  onClick={
+                    selectNextPeriod
+                  }
+                  style={{
+                    width:
+                      38,
+                    height:
+                      38,
+                    border:
+                      "1px solid #efdbe4",
+                    borderRadius:
+                      10,
+                    background:
+                      "#fff",
+                    cursor:
+                      "pointer",
+                  }}
+                >
+                  ›
+                </button>
               </div>
+            </section>
+          )}
 
-              {/* SELECTED JOB */}
+        {/* =================================================
+            WORK HOURS
+        ================================================= */}
 
-              {selectedJob && (
-                <JobCard
-                  key={
-                    selectedJob.id
+        {selectedJob && (
+          <section
+            style={{
+              background:
+                "#fff",
+              border:
+                "1px solid #f0dbe4",
+              borderRadius:
+                14,
+              padding:
+                14,
+              marginBottom:
+                12,
+            }}
+          >
+            <div
+              style={{
+                display:
+                  "flex",
+                justifyContent:
+                  "space-between",
+                alignItems:
+                  "center",
+              }}
+            >
+              <div>
+                <div
+                  style={{
+                    fontSize:
+                      10,
+                    fontWeight:
+                      800,
+                    color:
+                      "#9b6b8a",
+                    textTransform:
+                      "uppercase",
+                    letterSpacing:
+                      ".08em",
+                  }}
+                >
+                  Work Hours
+                </div>
+
+                <div
+                  style={{
+                    fontSize:
+                      11,
+                    color:
+                      "#9b6b8a",
+                    marginTop:
+                      3,
+                  }}
+                >
+                  {selectedPeriod
+                    ? `${formatDate(
+                        selectedPeriod.start
+                      )} – ${formatDate(
+                        selectedPeriod.end
+                      )}`
+                    : "Configure your pay schedule"}
+                </div>
+              </div>
+            </div>
+
+            <ShiftForm
+              job={
+                selectedJob
+              }
+              onAdd={
+                handleAddShift
+              }
+            />
+
+            <div
+              style={{
+                marginTop:
+                  14,
+              }}
+            >
+              {periodShifts.length ===
+              0 ? (
+                <div
+                  style={{
+                    padding:
+                      15,
+                    background:
+                      "#fff8fb",
+                    borderRadius:
+                      10,
+                    textAlign:
+                      "center",
+                    fontSize:
+                      11,
+                    color:
+                      "#9b6b8a",
+                  }}
+                >
+                  No work hours entered for this
+                  pay period yet.
+                </div>
+              ) : (
+                periodShifts.map(
+                  shift => {
+                    const calculated =
+                      calculateShift({
+                        ...shift,
+                        hourlyRate:
+                          shift.hourlyRate ??
+                          selectedJob.rate,
+                      });
+
+                    return (
+                      <div
+                        key={
+                          shift.id
+                        }
+                        style={{
+                          padding:
+                            11,
+                          borderTop:
+                            "1px solid #f3e1e8",
+                          display:
+                            "flex",
+                          justifyContent:
+                            "space-between",
+                          gap:
+                            10,
+                        }}
+                      >
+                        <div>
+                          <div
+                            style={{
+                              fontWeight:
+                                700,
+                              fontSize:
+                                12,
+                            }}
+                          >
+                            {formatDate(
+                              shift.date
+                            )}
+                          </div>
+
+                          <div
+                            style={{
+                              fontSize:
+                                11,
+                              color:
+                                "#9b6b8a",
+                            }}
+                          >
+                            {shift.startTime} –{" "}
+                            {shift.endTime}
+                            {" · "}
+                            {calculated.hours.toFixed(
+                              2
+                            )}{" "}
+                            paid hrs
+                          </div>
+
+                          {shift.isStatHoliday && (
+                            <div
+                              style={{
+                                fontSize:
+                                  10,
+                                color:
+                                  "#b77b1d",
+                                marginTop:
+                                  3,
+                              }}
+                            >
+                              🇨🇦{" "}
+                              {shift.holidayName ||
+                                "Stat Holiday"}
+                            </div>
+                          )}
+
+                          {numberOrZero(
+                            shift.freezingPremium
+                          ) >
+                            0 && (
+                            <div
+                              style={{
+                                fontSize:
+                                  10,
+                                color:
+                                  "#71849a",
+                                marginTop:
+                                  3,
+                              }}
+                            >
+                              ❄️ Freezing premium{" "}
+                              {money(
+                                shift.freezingPremium
+                              )}
+                              /hr
+                            </div>
+                          )}
+                        </div>
+
+                        <div
+                          style={{
+                            textAlign:
+                              "right",
+                          }}
+                        >
+                          <strong
+                            style={{
+                              fontSize:
+                                13,
+                            }}
+                          >
+                            {money(
+                              calculated.grossPay
+                            )}
+                          </strong>
+
+                          <div
+                            style={{
+                              marginTop:
+                                5,
+                            }}
+                          >
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleDeleteShift(
+                                  shift
+                                )
+                              }
+                              style={{
+                                border:
+                                  "none",
+                                background:
+                                  "transparent",
+                                color:
+                                  "#c94d6a",
+                                fontSize:
+                                  10,
+                                cursor:
+                                  "pointer",
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
                   }
-                  job={
-                    selectedJob
-                  }
-                  shifts={
-                    displayShifts
-                  }
-                  period={
-                    selectedPeriod
-                  }
-                  onAddShift={
-                    handleAddShift
-                  }
-                  onRemoveShift={
-                    handleRemoveShift
-                  }
-                  onSendEstimated={
-                    handleSendEstimated
-                  }
-                  onSendActual={
-                    handleSendActual
-                  }
-                  onUpdateJob={
-                    handleUpdateJob
-                  }
-                  onRemoveJob={
-                    handleRemoveJob
-                  }
-                />
+                )
               )}
+            </div>
+          </section>
+        )}
 
-              {/* BUDGET POOL */}
+        {/* =================================================
+            PAYCHECK SUMMARY
+        ================================================= */}
 
-              <PooledIncomeCard
-                entries={
-                  periodSent
-                }
-                total={
-                  totalPool
-                }
-                period={
-                  selectedPeriod
-                }
-                onRemove={
-                  handleRemoveSent
-                }
-              />
-
-              {/* ADD JOB */}
-
-              <button
-                type="button"
-                onClick={() =>
-                  setAddJobOpen(
-                    true
-                  )
-                }
-                style={{
-                  width: "100%",
-                  padding: 13,
-                  border:
-                    "1.5px solid var(--color-border)",
-                  borderRadius:
-                    "var(--radius-lg)",
-                  background: "#fff",
-                  color:
-                    "var(--color-text-soft)",
-                  fontWeight: 800,
-                  cursor:
-                    "pointer",
-                  marginBottom: 14,
-                }}
-              >
-                + Add Another Job / Employer
-              </button>
-
-              {/* EXPLANATION */}
-
+        {selectedJob &&
+          selectedPeriod && (
+            <section
+              style={{
+                background:
+                  "#fff",
+                border:
+                  "1px solid #f0dbe4",
+                borderRadius:
+                  14,
+                padding:
+                  14,
+                marginBottom:
+                  12,
+              }}
+            >
               <div
                 style={{
-                  ...cardStyle,
-                  background:
-                    "var(--color-bg-warm)",
+                  display:
+                    "flex",
+                  justifyContent:
+                    "space-between",
+                  alignItems:
+                    "flex-start",
+                  marginBottom:
+                    12,
                 }}
               >
-                <div
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 800,
-                    marginBottom: 6,
-                  }}
-                >
-                  💡 How Budget Blossom
-                  connects Income
-                </div>
+                <div>
+                  <div
+                    style={{
+                      fontSize:
+                        10,
+                      fontWeight:
+                        800,
+                      color:
+                        "#9b6b8a",
+                      textTransform:
+                        "uppercase",
+                      letterSpacing:
+                        ".08em",
+                    }}
+                  >
+                    Paycheck
+                  </div>
 
-                <div
-                  style={{
-                    fontSize: 11,
-                    color:
-                      "var(--color-text-soft)",
-                    lineHeight: 1.6,
-                  }}
-                >
-                  Work hours entered here
-                  become the source of truth
-                  for payroll. The selected
-                  employer determines the
-                  hourly rate, overtime rule,
-                  holiday multiplier,
-                  vacation percentage,
-                  estimated deductions and
-                  pay schedule.
-                  <br />
-                  <br />
-                  Later, these same shifts can
-                  automatically feed Calendar,
-                  Paychecks, Expenses and the
-                  Dashboard.
+                  <h2
+                    style={{
+                      margin:
+                        "3px 0 0",
+                      fontSize:
+                        20,
+                    }}
+                  >
+                    {selectedJob.person} —{" "}
+                    {selectedJob.employer}
+                  </h2>
+
+                  <div
+                    style={{
+                      fontSize:
+                        11,
+                      color:
+                        "#9b6b8a",
+                      marginTop:
+                        4,
+                    }}
+                  >
+                    Pay Period:{" "}
+                    <strong>
+                      {formatDate(
+                        selectedPeriod.start
+                      )}{" "}
+                      –{" "}
+                      {formatDate(
+                        selectedPeriod.end
+                      )}
+                    </strong>
+                  </div>
+
+                  <div
+                    style={{
+                      fontSize:
+                        11,
+                      color:
+                        "#9b6b8a",
+                      marginTop:
+                        2,
+                    }}
+                  >
+                    Payday:{" "}
+                    <strong
+                      style={{
+                        color:
+                          "#d32770",
+                      }}
+                    >
+                      {formatDate(
+                        selectedPeriod.payday
+                      )}
+                    </strong>
+                  </div>
                 </div>
               </div>
-            </>
+
+              {!payroll ? (
+                <div
+                  style={{
+                    padding:
+                      15,
+                    background:
+                      "#fff8fb",
+                    borderRadius:
+                      10,
+                    fontSize:
+                      11,
+                    color:
+                      "#9b6b8a",
+                  }}
+                >
+                  Add work hours to calculate this
+                  paycheck.
+                </div>
+              ) : (
+                <>
+                  <div
+                    style={{
+                      display:
+                        "grid",
+                      gridTemplateColumns:
+                        "1fr 1fr",
+                      gap:
+                        8,
+                      marginBottom:
+                        12,
+                    }}
+                  >
+                    {[
+                      [
+                        "Regular Hours",
+                        `${payroll.regularHours.toFixed(
+                          2
+                        )} hrs`,
+                      ],
+
+                      [
+                        "Overtime",
+                        `${payroll.overtimeHours.toFixed(
+                          2
+                        )} hrs`,
+                      ],
+
+                      [
+                        "Holiday Hours",
+                        `${payroll.statHours.toFixed(
+                          2
+                        )} hrs`,
+                      ],
+
+                      [
+                        "Premium Hours",
+                        `${payroll.premiumHours.toFixed(
+                          2
+                        )} hrs`,
+                      ],
+
+                      [
+                        "Freezing Premium",
+                        money(
+                          payroll.freezingPremiumPay
+                        ),
+                      ],
+
+                      [
+                        "Evening Premium",
+                        money(
+                          payroll.eveningPremiumPay
+                        ),
+                      ],
+                    ].map(
+                      ([
+                        label,
+                        value,
+                      ]) => (
+                        <div
+                          key={
+                            label
+                          }
+                          style={{
+                            background:
+                              "#fff8fb",
+                            padding:
+                              10,
+                            borderRadius:
+                              9,
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize:
+                                9,
+                              color:
+                                "#9b6b8a",
+                            }}
+                          >
+                            {label}
+                          </div>
+
+                          <strong
+                            style={{
+                              fontSize:
+                                13,
+                            }}
+                          >
+                            {value}
+                          </strong>
+                        </div>
+                      )
+                    )}
+                  </div>
+
+                  {/* PAYSTUB */}
+
+                  <div
+                    style={{
+                      borderTop:
+                        "1px solid #f0dbe4",
+                      paddingTop:
+                        12,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize:
+                          10,
+                        fontWeight:
+                          800,
+                        color:
+                          "#9b6b8a",
+                        textTransform:
+                          "uppercase",
+                        letterSpacing:
+                          ".08em",
+                        marginBottom:
+                          8,
+                      }}
+                    >
+                      Earnings
+                    </div>
+
+                    {[
+                      [
+                        "Regular",
+                        payroll.regularPay,
+                      ],
+
+                      [
+                        "Overtime",
+                        payroll.overtimePay,
+                      ],
+
+                      [
+                        "Stat Holiday",
+                        payroll.statPay,
+                      ],
+
+                      [
+                        "Freezing Premium",
+                        payroll.freezingPremiumPay,
+                      ],
+
+                      [
+                        "Evening Premium",
+                        payroll.eveningPremiumPay,
+                      ],
+
+                      [
+                        "Training",
+                        payroll.trainingPay,
+                      ],
+
+                      [
+                        "Vacation Pay",
+                        payroll.vacationPay,
+                      ],
+
+                      [
+                        "Bonus",
+                        payroll.bonus,
+                      ],
+
+                      [
+                        "Other",
+                        payroll.otherEarnings,
+                      ],
+                    ]
+                      .filter(
+                        ([
+                          ,
+                          value,
+                        ]) =>
+                          numberOrZero(
+                            value
+                          ) !== 0
+                      )
+                      .map(
+                        ([
+                          label,
+                          value,
+                        ]) => (
+                          <div
+                            key={
+                              label
+                            }
+                            style={{
+                              display:
+                                "flex",
+                              justifyContent:
+                                "space-between",
+                              padding:
+                                "5px 0",
+                              fontSize:
+                                12,
+                            }}
+                          >
+                            <span>
+                              {label}
+                            </span>
+
+                            <strong>
+                              {money(
+                                value
+                              )}
+                            </strong>
+                          </div>
+                        )
+                      )}
+
+                    <div
+                      style={{
+                        display:
+                          "flex",
+                        justifyContent:
+                          "space-between",
+                        paddingTop:
+                          9,
+                        marginTop:
+                          4,
+                        borderTop:
+                          "1px solid #f0dbe4",
+                        fontWeight:
+                          800,
+                      }}
+                    >
+                      <span>
+                        GROSS PAY
+                      </span>
+
+                      <span>
+                        {money(
+                          estimatedGross
+                        )}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* DEDUCTIONS */}
+
+                  <div
+                    style={{
+                      borderTop:
+                        "1px solid #f0dbe4",
+                      marginTop:
+                        12,
+                      paddingTop:
+                        12,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize:
+                          10,
+                        fontWeight:
+                          800,
+                        color:
+                          "#9b6b8a",
+                        textTransform:
+                          "uppercase",
+                        letterSpacing:
+                          ".08em",
+                        marginBottom:
+                          8,
+                      }}
+                    >
+                      Estimated Deductions
+                    </div>
+
+                    <div
+                      style={{
+                        display:
+                          "flex",
+                        justifyContent:
+                          "space-between",
+                        fontSize:
+                          12,
+                      }}
+                    >
+                      <span>
+                        Estimated deductions (
+                        {numberOrZero(
+                          selectedJob.deductionPercent ??
+                            selectedJob.ded ??
+                            0
+                        )}
+                        %)
+                      </span>
+
+                      <strong>
+                        −
+                        {money(
+                          estimatedDeductions
+                        )}
+                      </strong>
+                    </div>
+
+                    <div
+                      style={{
+                        display:
+                          "flex",
+                        justifyContent:
+                          "space-between",
+                        paddingTop:
+                          10,
+                        marginTop:
+                          7,
+                        borderTop:
+                          "1px solid #f0dbe4",
+                        fontWeight:
+                          800,
+                      }}
+                    >
+                      <span>
+                        ESTIMATED NET PAY
+                      </span>
+
+                      <span
+                        style={{
+                          fontSize:
+                            18,
+                          color:
+                            "#d32770",
+                        }}
+                      >
+                        {money(
+                          estimatedNet
+                        )}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* ACTUAL */}
+
+                  <div
+                    style={{
+                      marginTop:
+                        14,
+                      padding:
+                        13,
+                      background:
+                        "#f7fbf9",
+                      border:
+                        "1px solid #d9eee2",
+                      borderRadius:
+                        11,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize:
+                          10,
+                        fontWeight:
+                          800,
+                        color:
+                          "#5a876b",
+                        textTransform:
+                          "uppercase",
+                        letterSpacing:
+                          ".08em",
+                        marginBottom:
+                          8,
+                      }}
+                    >
+                      Actual Paycheck
+                    </div>
+
+                    <form
+                      onSubmit={
+                        handleSaveActualPay
+                      }
+                    >
+                      <div
+                        style={{
+                          display:
+                            "grid",
+                          gridTemplateColumns:
+                            "1fr 1fr",
+                          gap:
+                            8,
+                        }}
+                      >
+                        <div>
+                          <Label>
+                            Actual Gross
+                          </Label>
+
+                          <input
+                            name="actualGross"
+                            type="number"
+                            step="0.01"
+                            defaultValue={
+                              actual?.actualGross ??
+                              ""
+                            }
+                            placeholder="0.00"
+                            style={
+                              inputStyle
+                            }
+                          />
+                        </div>
+
+                        <div>
+                          <Label>
+                            Actual Net Pay
+                          </Label>
+
+                          <input
+                            name="actualNet"
+                            type="number"
+                            step="0.01"
+                            defaultValue={
+                              actual?.netPay ??
+                              ""
+                            }
+                            placeholder="0.00"
+                            style={
+                              inputStyle
+                            }
+                          />
+                        </div>
+                      </div>
+
+                      <div
+                        style={{
+                          display:
+                            "grid",
+                          gridTemplateColumns:
+                            "1fr 1fr 1fr 1fr",
+                          gap:
+                            6,
+                          marginTop:
+                            8,
+                        }}
+                      >
+                        <input
+                          name="federalTax"
+                          type="number"
+                          step="0.01"
+                          placeholder="Federal"
+                          defaultValue={
+                            actual?.federalTax ??
+                            ""
+                          }
+                          style={
+                            inputStyle
+                          }
+                        />
+
+                        <input
+                          name="cpp"
+                          type="number"
+                          step="0.01"
+                          placeholder="CPP"
+                          defaultValue={
+                            actual?.cpp ??
+                            ""
+                          }
+                          style={
+                            inputStyle
+                          }
+                        />
+
+                        <input
+                          name="ei"
+                          type="number"
+                          step="0.01"
+                          placeholder="EI"
+                          defaultValue={
+                            actual?.ei ??
+                            ""
+                          }
+                          style={
+                            inputStyle
+                          }
+                        />
+
+                        <input
+                          name="otherDeductions"
+                          type="number"
+                          step="0.01"
+                          placeholder="Other"
+                          defaultValue={
+                            actual?.otherDeductions ??
+                            ""
+                          }
+                          style={
+                            inputStyle
+                          }
+                        />
+                      </div>
+
+                      <div
+                        style={{
+                          marginTop:
+                            9,
+                        }}
+                      >
+                        <Button>
+                          Save Actual Paycheck
+                        </Button>
+                      </div>
+                    </form>
+
+                    {actual && (
+                      <div
+                        style={{
+                          marginTop:
+                            12,
+                          paddingTop:
+                            10,
+                          borderTop:
+                            "1px solid #d9eee2",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display:
+                              "flex",
+                            justifyContent:
+                              "space-between",
+                            fontSize:
+                              12,
+                          }}
+                        >
+                          <span>
+                            Estimated Net
+                          </span>
+
+                          <strong>
+                            {money(
+                              estimatedNet
+                            )}
+                          </strong>
+                        </div>
+
+                        <div
+                          style={{
+                            display:
+                              "flex",
+                            justifyContent:
+                              "space-between",
+                            fontSize:
+                              12,
+                            marginTop:
+                              4,
+                          }}
+                        >
+                          <span>
+                            Actual Net
+                          </span>
+
+                          <strong>
+                            {money(
+                              actualNet
+                            )}
+                          </strong>
+                        </div>
+
+                        <div
+                          style={{
+                            display:
+                              "flex",
+                            justifyContent:
+                              "space-between",
+                            marginTop:
+                              8,
+                            paddingTop:
+                              8,
+                            borderTop:
+                              "1px solid #d9eee2",
+                            fontWeight:
+                              800,
+                          }}
+                        >
+                          <span>
+                            Difference
+                          </span>
+
+                          <span
+                            style={{
+                              color:
+                                difference ===
+                                0
+                                  ? "#4c8b65"
+                                  : "#c27635",
+                            }}
+                          >
+                            {difference >=
+                            0
+                              ? "+"
+                              : ""}
+                            {money(
+                              difference
+                            )}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </section>
           )}
+
+        {/* =================================================
+            TOAST
+        ================================================= */}
+
+        {toast && (
+          <div
+            style={{
+              position:
+                "fixed",
+              left:
+                "50%",
+              bottom:
+                85,
+              transform:
+                "translateX(-50%)",
+              background:
+                "#241a29",
+              color:
+                "#fff",
+              padding:
+                "10px 14px",
+              borderRadius:
+                10,
+              fontSize:
+                11,
+              zIndex:
+                1200,
+              boxShadow:
+                "0 8px 25px rgba(0,0,0,.2)",
+              maxWidth:
+                "90vw",
+              textAlign:
+                "center",
+            }}
+          >
+            {toast}
+          </div>
+        )}
       </div>
 
-      {/* ADD JOB MODAL */}
+      {/* =================================================
+          JOB EDITOR MODAL
+      ================================================= */}
 
-      <AddJobModal
-        open={addJobOpen}
-        onClose={() =>
-          setAddJobOpen(false)
-        }
-        onAdd={
-          handleAddJob
-        }
-      />
-
-      {/* TOAST */}
-
-      {toast && (
-        <div
-          style={{
-            position: "fixed",
-            left: "50%",
-            bottom: 78,
-            transform:
-              "translateX(-50%)",
-            zIndex: 1200,
-            background:
-              "#1a0f1e",
-            color: "#fff",
-            padding:
-              "10px 14px",
-            borderRadius: 12,
-            fontSize: 12,
-            fontWeight: 700,
-            boxShadow:
-              "0 8px 30px rgba(0,0,0,.18)",
-            maxWidth:
-              "calc(100% - 30px)",
-            textAlign:
-              "center",
-          }}
-          onClick={() =>
-            setToast("")
+      {jobEditor && (
+        <JobEditor
+          job={
+            jobEditor ===
+            "new"
+              ? null
+              : jobEditor
           }
-        >
-          {toast}
-        </div>
+          onSave={
+            handleSaveJob
+          }
+          onClose={() =>
+            setJobEditor(
+              null
+            )
+          }
+        />
       )}
     </div>
   );
