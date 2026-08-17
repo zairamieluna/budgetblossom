@@ -2,7 +2,7 @@
  * App.jsx
  * Budget Blossom
  *
- * Root application with bottom navigation.
+ * Main application shell and navigation.
  */
 
 import { useState } from "react";
@@ -10,7 +10,6 @@ import { useState } from "react";
 import "./styles/globals.css";
 
 import { ThemeProvider } from "./context/ThemeContext";
-
 import BottomNav from "./components/common/BottomNav";
 
 import Dashboard from "./pages/Dashboard";
@@ -21,7 +20,8 @@ import Savings from "./pages/Savings";
 import Forecast from "./pages/Forecast";
 import Calendar from "./pages/Calendar";
 import Settings from "./pages/Settings";
-import Scanner from "./pages/Scanner";
+import Debts from "./pages/Debts";
+import Jars from "./pages/Jars";
 
 const PAGES = {
   dashboard: Dashboard,
@@ -32,13 +32,10 @@ const PAGES = {
   // Goals
   goals: Savings,
 
-  // Scanner
-  scan: Scanner,
-
   // More
   more: Settings,
 
-  // Existing pages — kept available
+  // Existing pages
   expenses: Expenses,
   income: Income,
   cards: Cards,
@@ -46,21 +43,25 @@ const PAGES = {
   forecast: Forecast,
   calendar: Calendar,
   settings: Settings,
+  debts: Debts,
+  jars: Jars,
 };
 
 export default function App() {
   const [activePage, setActivePage] = useState("dashboard");
 
-  const CurrentPage = PAGES[activePage] ?? Dashboard;
+  const CurrentPage = PAGES[activePage] || Dashboard;
 
   return (
     <ThemeProvider>
-      <CurrentPage />
+      <div className="app-shell">
+        <CurrentPage />
 
-      <BottomNav
-        activePage={activePage}
-        onNavigate={setActivePage}
-      />
+        <BottomNav
+          activePage={activePage}
+          onNavigate={setActivePage}
+        />
+      </div>
     </ThemeProvider>
   );
 }
