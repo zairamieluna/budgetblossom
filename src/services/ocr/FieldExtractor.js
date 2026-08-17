@@ -1,4 +1,72 @@
-function extractCreditCardFields(text) {
+// src/services/ocr/FieldExtractor.js
+
+function normalizeText(text) {
+  return String(text || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function extractMoneyNearLabels(text, labels) {
+  const normalized = normalizeText(text);
+
+  for (const label of labels) {
+    const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    const regex = new RegExp(
+      `${escapedLabel}\\s*[:\\-]?\\s*\\$?\\s*([0-9,]+(?:\\.\\d{2})?)`,
+      "i"
+    );
+
+    const match = normalized.match(regex);
+
+    if (match) {
+      const value = Number(match[1].replace(/,/g, ""));
+
+      if (Number.isFinite(value)) {
+        return value;
+      }
+    }
+  }
+
+  return null;
+}
+
+function extractDateNearLabels(text, labels) {
+  const normalized = normalizeText(text);
+
+  for (const label of labels) {
+    const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    const regex = new RegExp(
+      `${escapedLabel}\\s*[:\\-]?\\s*` +
+        `(` +
+        `\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4}` +
+        `|` +
+        `[a-z]{3,9}\\s+\\d{1,2}(?:,\\s*|\\s+)\\d{4}` +
+        `|` +
+        `\\d{1,2}\\s+[a-z]{3,9}\\s+\\d{4}` +
+        `)`,
+      "i"
+    );
+
+    const match = normalized.match(regex);
+
+    if (match) {
+      return match[1];
+    }
+  }
+
+  return null;
+}
+
+/*
+ * -------------------------------------------------------
+ * CREDIT CARD FIELD EXTRACTION
+ * -------------------------------------------------------
+ */
+
+export function extractCreditCardFields(text) {
   const normalized = normalizeText(text);
 
   /*
@@ -31,7 +99,6 @@ function extractCreditCardFields(text) {
     "new balance",
   ]);
 
-
   /*
    * -------------------------------------------------------
    * CREDIT LIMIT
@@ -45,7 +112,6 @@ function extractCreditCardFields(text) {
     "approved credit limit",
     "card limit",
   ]);
-
 
   /*
    * -------------------------------------------------------
@@ -67,7 +133,6 @@ function extractCreditCardFields(text) {
     "remaining available credit",
   ]);
 
-
   /*
    * -------------------------------------------------------
    * MINIMUM PAYMENT
@@ -81,7 +146,6 @@ function extractCreditCardFields(text) {
     "minimum due",
     "payment due amount",
   ]);
-
 
   /*
    * -------------------------------------------------------
@@ -97,7 +161,6 @@ function extractCreditCardFields(text) {
     "due on",
   ]);
 
-
   return {
     bank: null,
     cardName: null,
@@ -107,4 +170,21 @@ function extractCreditCardFields(text) {
     minimumPayment,
     dueDate,
   };
+}
+
+/*
+ * -------------------------------------------------------
+ * GENERIC OCR FIELD EXTRACTION
+ * -------------------------------------------------------
+ *
+ * OCRPipeline.js imports this function:
+ *
+ * import { extractFields } from "./FieldExtractor";
+ *
+ * Keep this export so the OCR pipeline can call the
+ * credit-card extractor without causing a build error.
+ */
+
+export function extractFields(text) {
+  return extractCreditCardFields(text);
 }
