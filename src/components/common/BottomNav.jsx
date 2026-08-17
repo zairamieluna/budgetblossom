@@ -3,16 +3,43 @@
  * Budget Blossom
  *
  * Main bottom navigation.
- * Scanner has been completely removed.
+ *
+ * Navigation:
+ * Home → Dashboard
+ * Income → Work Hours / Payroll / Paychecks
+ * Expenses → Bills / Recurring Expenses
+ * Goals → Savings / Financial Goals
+ * More → Additional features / Settings
  */
 
 import { typography, transitions } from "../../ui/designTokens";
 
 const NAV_ITEMS = [
-  { id: "dashboard", label: "Home", emoji: "🏠" },
-  { id: "money", label: "Money", emoji: "💳" },
-  { id: "goals", label: "Goals", emoji: "🎯" },
-  { id: "more", label: "More", emoji: "☰" },
+  {
+    id: "dashboard",
+    label: "Home",
+    emoji: "🏠",
+  },
+  {
+    id: "income",
+    label: "Income",
+    emoji: "💰",
+  },
+  {
+    id: "expenses",
+    label: "Expenses",
+    emoji: "🧾",
+  },
+  {
+    id: "goals",
+    label: "Goals",
+    emoji: "🎯",
+  },
+  {
+    id: "more",
+    label: "More",
+    emoji: "☰",
+  },
 ];
 
 export default function BottomNav({
@@ -40,16 +67,14 @@ export default function BottomNav({
       }}
     >
       {NAV_ITEMS.map((item) => {
-        const isActive =
-          activePage === item.id;
+        const isActive = activePage === item.id;
 
         return (
           <button
             key={item.id}
             type="button"
-            onClick={() =>
-              onNavigate(item.id)
-            }
+            onClick={() => onNavigate(item.id)}
+            aria-label={item.label}
             style={{
               display: "flex",
               flexDirection: "column",
@@ -85,18 +110,14 @@ export default function BottomNav({
                 transform: isActive
                   ? "scale(1.1)"
                   : "scale(1)",
-                opacity: isActive
-                  ? 1
-                  : 0.7,
+                opacity: isActive ? 1 : 0.7,
                 transition: `all ${transitions.base}`,
               }}
             >
               {item.emoji}
             </span>
 
-            <span>
-              {item.label}
-            </span>
+            <span>{item.label}</span>
           </button>
         );
       })}
