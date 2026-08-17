@@ -1,8 +1,16 @@
 // Budget Blossom - Income & Payroll Calculation Engine
+//
+// IMPORTANT:
+// - Pay period dates and payday are separate concepts.
+// - Premiums such as freezing/evening are hourly premiums.
+// - Overtime is calculated cumulatively inside the pay period.
+// - Stat holiday treatment is configurable per shift/job.
+// - Existing/legacy field names remain supported.
 
 export type EarningType =
   | "regular"
   | "overtime"
+  | "stat"
   | "stat_1x"
   | "stat_1_5x"
   | "stat_2x"
@@ -15,10 +23,12 @@ export type EarningType =
 
 export interface WorkShift {
   date: string;
-  startTime: string;
-  endTime: string;
+
+  startTime?: string;
+  endTime?: string;
   unpaidBreakMinutes?: number;
-  hourlyRate: number;
+
+  hourlyRate?: number;
 
   overtimeThreshold?: number;
   overtimeMultiplier?: number;
@@ -26,14 +36,25 @@ export interface WorkShift {
   isStatHoliday?: boolean;
   statMultiplier?: number;
 
+  // HOURLY premium rates.
+  // Example:
+  // freezingPremium: 1.50
+  // 8 hours × $1.50 = $12.00
   freezingPremium?: number;
+
+  // HOURLY premium rate.
   eveningPremium?: number;
 
   trainingHours?: number;
+
   bonus?: number;
   otherEarnings?: number;
 
   notes?: string;
+
+  // Optional explicit overtime hours.
+  // Normally leave this empty and let the calculator determine OT.
+  overtimeHours?: number;
 
   // Legacy Budget Blossom fields
   id?: number | string;
@@ -43,6 +64,10 @@ export interface WorkShift {
   type?: EarningType | string;
   rate?: number;
   hol?: string | null;
+
+  // Compatibility if an older version stored a fixed premium amount.
+  freezingPremiumAmount?: number;
+  eveningPremiumAmount?: number;
 }
 
 export interface Paycheck {
@@ -58,8 +83,14 @@ export interface Paycheck {
 
   regularPay: number;
   overtimePay: number;
+
   statPay: number;
+  statPremiumPay: number;
+
   premiumPay: number;
+  freezingPremiumPay: number;
+  eveningPremiumPay: number;
+
   trainingPay: number;
   vacationPay: number;
   bonus: number;
@@ -76,93 +107,89 @@ export interface Paycheck {
   netPay: number;
 }
 
-const roundMoney = (value: number): number =>
-  Math.round((value + Number.EPSILON) * 100) / 100;
+const roundMoney = (value: number) =>
+  Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 
-const roundHours = (value: number): number =>
-  Math.round((value + Number.EPSILON) * 100) / 100;
+const roundHours = (value: number) =>
+  Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 
-/**
- * Calculate paid hours for one shift.
- *
- * Supports overnight shifts.
- *
- * Example:
- * 08:00 - 16:00 with 30 minute break
- * = 7.5 paid hours
- */
+const safeNumber = (value: unknown) => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+/* =========================================================
+   SHIFT HOURS
+========================================================= */
+
 export function calculateShiftHours(
   startTime: string,
   endTime: string,
   unpaidBreakMinutes = 0
 ): number {
-  const [startHour, startMinute] =
-    startTime.split(":").map(Number);
+  if (!startTime || !endTime) {
+    return 0;
+  }
 
-  const [endHour, endMinute] =
-    endTime.split(":").map(Number);
+  const startParts = startTime.split(":").map(Number);
+  const endParts = endTime.split(":").map(Number);
 
-  let start =
-    startHour * 60 +
-    startMinute;
+  const startHour = startParts[0] ?? 0;
+  const startMinute = startParts[1] ?? 0;
 
-  let end =
-    endHour * 60 +
-    endMinute;
+  const endHour = endParts[0] ?? 0;
+  const endMinute = endParts[1] ?? 0;
 
-  // Overnight shift
+  let start = startHour * 60 + startMinute;
+  let end = endHour * 60 + endMinute;
+
+  // Overnight shift.
   if (end < start) {
     end += 24 * 60;
   }
 
-  const totalMinutes = Math.max(
+  const totalMinutes = Math.max(0, end - start);
+
+  const breakMinutes = Math.max(
     0,
-    end - start
+    safeNumber(unpaidBreakMinutes)
   );
 
   const paidMinutes = Math.max(
     0,
-    totalMinutes -
-      Math.max(
-        0,
-        Number(unpaidBreakMinutes) || 0
-      )
+    totalMinutes - breakMinutes
   );
 
-  return roundHours(
-    paidMinutes / 60
-  );
+  return roundHours(paidMinutes / 60);
 }
 
-/**
- * Calculate one individual work shift.
- *
- * IMPORTANT:
- * Overtime is NOT assigned here.
- *
- * Overtime is calculated cumulatively
- * by calculatePaycheck() based on the
- * employer's configured threshold.
- */
-export function calculateShift(
-  shift: WorkShift
-) {
-  const hours =
-    calculateShiftHours(
-      shift.startTime ??
-        shift.inT ??
-        "",
+/* =========================================================
+   ONE SHIFT
+========================================================= */
 
-      shift.endTime ??
-        shift.outT ??
-        "",
+export function calculateShift(shift: WorkShift) {
+  const startTime =
+    shift.startTime ??
+    shift.inT ??
+    "";
 
-      shift.unpaidBreakMinutes ??
-        shift.brk ??
-        0
-    );
+  const endTime =
+    shift.endTime ??
+    shift.outT ??
+    "";
 
-  const rate = Number(
+  const breakMinutes =
+    shift.unpaidBreakMinutes ??
+    shift.brk ??
+    0;
+
+  const hours = calculateShiftHours(
+    startTime,
+    endTime,
+    breakMinutes
+  );
+
+  const rate = safeNumber(
     shift.hourlyRate ??
       shift.rate ??
       0
@@ -170,19 +197,20 @@ export function calculateShift(
 
   const statMultiplier =
     Number.isFinite(
-      Number(
-        shift.statMultiplier
-      )
+      Number(shift.statMultiplier)
     )
-      ? Number(
-          shift.statMultiplier
-        )
+      ? safeNumber(shift.statMultiplier)
       : 1;
 
   const isStatHoliday =
     Boolean(
       shift.isStatHoliday
-    );
+    ) ||
+    shift.type === "stat" ||
+    shift.type === "stat_1x" ||
+    shift.type === "stat_1_5x" ||
+    shift.type === "stat_2x" ||
+    Boolean(shift.hol);
 
   const regularHours =
     isStatHoliday
@@ -202,24 +230,72 @@ export function calculateShift(
     rate *
     statMultiplier;
 
-  const premiumPay =
-    Number(
-      shift.freezingPremium ??
-        0
-    ) +
-    Number(
-      shift.eveningPremium ??
-        0
+  /*
+   * PREMIUMS
+   *
+   * These are HOURLY premium rates.
+   *
+   * Example:
+   * 8 hours
+   * $1.50 freezing premium
+   *
+   * 8 × $1.50 = $12.00
+   */
+
+  const freezingRate =
+    safeNumber(
+      shift.freezingPremium
     );
+
+  const eveningRate =
+    safeNumber(
+      shift.eveningPremium
+    );
+
+  const freezingPremiumPay =
+    hours * freezingRate;
+
+  const eveningPremiumPay =
+    hours * eveningRate;
+
+  /*
+   * Compatibility with an older version that may have
+   * stored an already-calculated fixed amount.
+   */
+  const freezingFixed =
+    safeNumber(
+      shift.freezingPremiumAmount
+    );
+
+  const eveningFixed =
+    safeNumber(
+      shift.eveningPremiumAmount
+    );
+
+  const freezingPay =
+    freezingPremiumPay +
+    freezingFixed;
+
+  const eveningPay =
+    eveningPremiumPay +
+    eveningFixed;
+
+  const premiumPay =
+    freezingPay +
+    eveningPay;
+
+  const premiumHours =
+    premiumPay > 0
+      ? hours
+      : 0;
 
   const trainingHours =
     Math.min(
       hours,
       Math.max(
         0,
-        Number(
-          shift.trainingHours ??
-            0
+        safeNumber(
+          shift.trainingHours
         )
       )
     );
@@ -228,15 +304,13 @@ export function calculateShift(
     trainingHours * rate;
 
   const bonus =
-    Number(
-      shift.bonus ??
-        0
+    safeNumber(
+      shift.bonus
     );
 
   const otherEarnings =
-    Number(
-      shift.otherEarnings ??
-        0
+    safeNumber(
+      shift.otherEarnings
     );
 
   return {
@@ -244,84 +318,74 @@ export function calculateShift(
       roundHours(hours),
 
     regularHours:
-      roundHours(
-        regularHours
-      ),
+      roundHours(regularHours),
 
-    overtimeHours: 0,
+    overtimeHours:
+      0,
 
     statHours:
-      roundHours(
-        statHours
-      ),
+      roundHours(statHours),
+
+    premiumHours:
+      roundHours(premiumHours),
 
     trainingHours:
-      roundHours(
-        trainingHours
-      ),
+      roundHours(trainingHours),
 
     regularPay:
-      roundMoney(
-        regularPay
-      ),
+      roundMoney(regularPay),
 
-    overtimePay: 0,
+    overtimePay:
+      0,
 
     statPay:
-      roundMoney(
-        statPay
-      ),
+      roundMoney(statPay),
+
+    statPremiumPay:
+      0,
 
     premiumPay:
-      roundMoney(
-        premiumPay
-      ),
+      roundMoney(premiumPay),
+
+    freezingPremiumPay:
+      roundMoney(freezingPay),
+
+    eveningPremiumPay:
+      roundMoney(eveningPay),
 
     trainingPay:
-      roundMoney(
-        trainingPay
-      ),
+      roundMoney(trainingPay),
 
     bonus:
-      roundMoney(
-        bonus
-      ),
+      roundMoney(bonus),
 
     otherEarnings:
-      roundMoney(
-        otherEarnings
-      ),
+      roundMoney(otherEarnings),
 
     grossPay:
       roundMoney(
         regularPay +
-          statPay +
-          premiumPay +
-          trainingPay +
-          bonus +
-          otherEarnings
-      ),
+        statPay +
+        premiumPay +
+        trainingPay +
+        bonus +
+        otherEarnings +
+        premiumPay
+      )
   };
 }
 
-/**
- * Calculate a complete paycheck
- * from all shifts in a pay period.
- *
- * Default overtime rule:
- *
- * First 44 non-stat hours
- * = regular pay
- *
- * Hours above threshold
- * = overtime at 1.5x
- *
- * Both threshold and multiplier
- * are configurable.
- */
+/* =========================================================
+   COMPLETE PAYCHECK
+========================================================= */
+
 export function calculatePaycheck(
   shifts: WorkShift[],
   options?: {
+    payPeriodStart?: string;
+    payPeriodEnd?: string;
+    payDate?: string;
+
     vacationPercent?: number;
 
     bonus?: number;
@@ -335,11 +399,18 @@ export function calculatePaycheck(
     overtimeMultiplier?: number;
   }
 ): Paycheck {
-  if (!shifts.length) {
-    throw new Error(
-      "At least one work shift is required."
-    );
-  }
+  const validShifts =
+    Array.isArray(shifts)
+      ? [...shifts]
+          .filter(Boolean)
+          .sort(
+            (a, b) =>
+              String(a.date ?? "")
+                .localeCompare(
+                  String(b.date ?? "")
+                )
+          )
+      : [];
 
   let regularHours = 0;
   let overtimeHours = 0;
@@ -351,61 +422,50 @@ export function calculatePaycheck(
   let overtimePay = 0;
   let statPay = 0;
   let premiumPay = 0;
+  let freezingPremiumPay = 0;
+  let eveningPremiumPay = 0;
+  let statPremiumPay = 0;
   let trainingPay = 0;
-
   let shiftBonus = 0;
   let otherEarningsPay = 0;
 
   /*
-   * Get overtime threshold.
-   *
-   * Priority:
-   *
-   * 1. Paycheck options
-   * 2. Shift configuration
-   * 3. Default 44 hours
+   * Employer-level overtime settings.
    */
   const thresholdFromShift =
-    shifts.find(
-      (shift) =>
+    validShifts.find(
+      shift =>
         Number.isFinite(
           Number(
             shift.overtimeThreshold
           )
         )
-    )?.overtimeThreshold;
+    )
+      ?.overtimeThreshold;
 
   const overtimeThreshold =
     Math.max(
       0,
-      Number(
+      safeNumber(
         options?.overtimeThreshold ??
           thresholdFromShift ??
           44
       )
     );
 
-  /*
-   * Get overtime multiplier.
-   *
-   * Priority:
-   *
-   * 1. Paycheck options
-   * 2. Shift configuration
-   * 3. Default 1.5x
-   */
   const multiplierFromShift =
-    shifts.find(
-      (shift) =>
+    validShifts.find(
+      shift =>
         Number.isFinite(
           Number(
             shift.overtimeMultiplier
           )
         )
-    )?.overtimeMultiplier;
+    )
+      ?.overtimeMultiplier;
 
   const defaultOvertimeMultiplier =
-    Number(
+    safeNumber(
       options?.overtimeMultiplier ??
         multiplierFromShift ??
         1.5
@@ -413,22 +473,21 @@ export function calculatePaycheck(
 
   let cumulativeRegularHours = 0;
 
-  /*
-   * Process each shift.
-   */
-  for (const shift of shifts) {
+  for (
+    const shift of validShifts
+  ) {
     const result =
       calculateShift(
         shift
       );
 
     /*
-     * Stat holiday shifts
-     * are kept separate from
-     * regular/overtime hours.
+     * Stat holiday shifts are handled separately.
      */
     if (
-      shift.isStatHoliday
+      Boolean(
+        result.statHours
+      )
     ) {
       statHours +=
         result.statHours;
@@ -437,9 +496,8 @@ export function calculatePaycheck(
         result.statPay;
     } else {
       /*
-       * Determine how many
-       * regular hours remain
-       * before overtime begins.
+       * Regular hours and overtime are calculated
+       * cumulatively within THIS paycheck.
        */
       const remainingRegular =
         Math.max(
@@ -448,93 +506,73 @@ export function calculatePaycheck(
             cumulativeRegularHours
         );
 
-      const shiftRegularHours =
+      const regularForShift =
         Math.min(
           result.hours,
           remainingRegular
         );
 
-      const shiftOvertimeHours =
+      const overtimeForShift =
         Math.max(
           0,
           result.hours -
-            shiftRegularHours
+            regularForShift
         );
 
       const rate =
-        Number(
+        safeNumber(
           shift.hourlyRate ??
             shift.rate ??
             0
         );
 
       const multiplier =
-        Number(
-          shift.overtimeMultiplier
+        safeNumber(
+          shift.overtimeMultiplier ??
+            defaultOvertimeMultiplier
         ) ||
         defaultOvertimeMultiplier;
 
       regularHours +=
-        shiftRegularHours;
+        regularForShift;
 
       overtimeHours +=
-        shiftOvertimeHours;
+        overtimeForShift;
 
       regularPay +=
-        shiftRegularHours *
+        regularForShift *
         rate;
 
       overtimePay +=
-        shiftOvertimeHours *
+        overtimeForShift *
         rate *
         multiplier;
 
       cumulativeRegularHours +=
-        shiftRegularHours;
+        regularForShift;
     }
 
-    /*
-     * Premiums
-     */
+    premiumHours +=
+      result.premiumHours;
+
     premiumPay +=
       result.premiumPay;
 
-    /*
-     * Track premium hours.
-     */
-    const hasPremium =
-      Number(
-        shift.freezingPremium ??
-          0
-      ) > 0 ||
-      Number(
-        shift.eveningPremium ??
-          0
-      ) > 0;
+    freezingPremiumPay +=
+      result.freezingPremiumPay;
 
-    if (hasPremium) {
-      premiumHours +=
-        result.hours;
-    }
+    eveningPremiumPay +=
+      result.eveningPremiumPay;
 
-    /*
-     * Training
-     */
     trainingHours +=
       result.trainingHours;
 
     trainingPay +=
       result.trainingPay;
 
-    /*
-     * Bonuses
-     */
     shiftBonus +=
       result.bonus;
 
-    /*
-     * Other earnings
-     */
     otherEarningsPay +=
       result.otherEarnings;
   }
@@ -543,26 +581,29 @@ export function calculatePaycheck(
    * Vacation pay.
    *
    * Example:
-   * 4% = 0.04
+   * 4 = 4%
+   * 0.04 = 4%
+   *
+   * The function accepts either.
    */
+  const rawVacation =
+    safeNumber(
+      options?.vacationPercent
+    );
+
   const vacationPercent =
-    Number(
-      options?.vacationPercent ??
-        0
-    );
+    rawVacation > 1
+      ? rawVacation / 100
+      : rawVacation;
 
-  /*
-   * Additional paycheck-level bonus.
-   */
   const additionalBonus =
-    Number(
-      options?.bonus ??
-        0
+    safeNumber(
+      options?.bonus
     );
 
   /*
-   * Earnings before vacation
-   * and paycheck-level bonus.
+   * Premiums and other eligible earnings
+   * are included in the vacation base for now.
    */
   const baseEarnings =
     regularPay +
@@ -573,74 +614,57 @@ export function calculatePaycheck(
     shiftBonus +
     otherEarningsPay;
 
-  /*
-   * Vacation pay is calculated
-   * from base earnings.
-   */
   const vacationPay =
     baseEarnings *
     vacationPercent;
 
-  /*
-   * Total gross pay.
-   */
   const grossPay =
     baseEarnings +
     vacationPay +
     additionalBonus;
 
-  /*
-   * Deductions.
-   *
-   * These are passed in by
-   * the Income page based on
-   * the person's configured
-   * deductions.
-   */
   const federalTax =
-    Number(
-      options?.federalTax ??
-        0
+    safeNumber(
+      options?.federalTax
     );
 
   const cpp =
-    Number(
-      options?.cpp ??
-        0
+    safeNumber(
+      options?.cpp
     );
 
   const ei =
-    Number(
-      options?.ei ??
-        0
+    safeNumber(
+      options?.ei
     );
 
   const otherDeductions =
-    Number(
-      options?.otherDeductions ??
-        0
+    safeNumber(
+      options?.otherDeductions
     );
 
-  /*
-   * Total deductions.
-   */
   const totalDeductions =
     federalTax +
     cpp +
     ei +
     otherDeductions;
 
-  /*
-   * Estimated net pay.
-   */
   const netPay =
     grossPay -
     totalDeductions;
 
   return {
-    payPeriodStart: "",
-    payPeriodEnd: "",
-    payDate: "",
+    payPeriodStart:
+      options?.payPeriodStart ??
+      "",
+
+    payPeriodEnd:
+      options?.payPeriodEnd ??
+      "",
+
+    payDate:
+      options?.payDate ??
+      "",
 
     regularHours:
       roundHours(
@@ -682,9 +706,24 @@ export function calculatePaycheck(
         statPay
       ),
 
+    statPremiumPay:
+      roundMoney(
+        statPremiumPay
+      ),
+
     premiumPay:
       roundMoney(
         premiumPay
+      ),
+
+    freezingPremiumPay:
+      roundMoney(
+        freezingPremiumPay
+      ),
+
+    eveningPremiumPay:
+      roundMoney(
+        eveningPremiumPay
       ),
 
     trainingPay:
@@ -700,7 +739,7 @@ export function calculatePaycheck(
     bonus:
       roundMoney(
         additionalBonus +
-          shiftBonus
+        shiftBonus
       ),
 
     otherEarnings:
@@ -741,6 +780,31 @@ export function calculatePaycheck(
     netPay:
       roundMoney(
         netPay
-      ),
+      )
   };
+}
+
+/* =========================================================
+   SIMPLE ESTIMATED NET HELPER
+========================================================= */
+
+export function estimateNetPay(
+  grossPay: number,
+  deductionPercent = 0
+) {
+  const gross =
+    safeNumber(
+      grossPay
+    );
+
+  const percent =
+    safeNumber(
+      deductionPercent
+    );
+
+  return roundMoney(
+    gross -
+      gross *
+        (percent / 100)
+  );
 }
