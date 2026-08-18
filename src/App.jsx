@@ -29,7 +29,10 @@ const PAGES = {
 
   expenses: Expenses,
   income: Income,
+
+  // Credit Card Tracker
   cards: Cards,
+
   savings: Savings,
   forecast: Forecast,
   calendar: Calendar,
@@ -38,7 +41,6 @@ const PAGES = {
   settings: Settings,
 
   // Bottom navigation
-  money: Expenses,
   goals: Savings,
   more: Settings,
 };
