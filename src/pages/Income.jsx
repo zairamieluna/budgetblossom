@@ -2,82 +2,113 @@
  * Income.jsx
  * Budget Blossom
  *
- * Income & Work Hours
+ * Income + Work Hours
  *
  * Features:
- * - Multiple household income sources
- * - Open / close individual jobs
- * - Add work hours
- * - Edit saved work hours
- * - Delete saved work hours
- * - Automatically sort work hours chronologically
+ * - Household jobs
+ * - Open / close job
+ * - Add / edit work hours
+ * - Chronological work dates
+ * - Persistent localStorage
+ * - Pay period / payday
+ * - Payroll estimate
  * - Edit job
  * - Delete job
- * - New job
- * - Pay-period configuration
- * - Payday configuration
- * - Work hours persist independently for each job
- * - Payroll estimate
- * - Regular / overtime / holiday hours
- * - Estimated gross / net
  */
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 /* =========================================================
    STORAGE
 ========================================================= */
 
-const JOB_STORAGE_KEY =
-  "budgetBlossomIncomeJobs";
+const STORAGE_KEY =
+  "budgetBlossom_income_v2";
 
-const HOURS_STORAGE_KEY =
-  "budgetBlossomWorkHours";
+/* =========================================================
+   DEFAULT JOBS
+========================================================= */
+
+const DEFAULT_JOBS = [
+  {
+    id: "zai-aw",
+    owner: "Zai",
+    employer: "A&W",
+    position: "Cashier/Kitchen",
+    rate: 18,
+    type: "Hourly",
+    payPeriodStart: "2026-08-01",
+    payPeriodEnd: "2026-08-15",
+    payday: "2026-08-21",
+    open: false,
+    hours: [],
+  },
+  {
+    id: "zai-loblaws",
+    owner: "Zai",
+    employer: "Loblaws",
+    position: "Employee",
+    rate: 17.6,
+    type: "Hourly",
+    payPeriodStart: "2026-08-01",
+    payPeriodEnd: "2026-08-15",
+    payday: "2026-08-21",
+    open: false,
+    hours: [],
+  },
+  {
+    id: "ariel-witron",
+    owner: "Ariel",
+    employer: "Witron",
+    position: "Equipment Operator",
+    rate: 21,
+    type: "Hourly",
+    payPeriodStart: "2026-08-01",
+    payPeriodEnd: "2026-08-15",
+    payday: "2026-08-21",
+    open: false,
+    hours: [],
+  },
+];
 
 /* =========================================================
    HELPERS
 ========================================================= */
 
-function makeId(prefix = "id") {
-  return `${prefix}_${Date.now()}_${Math.random()
-    .toString(36)
-    .slice(2, 9)}`;
-}
-
 function money(value) {
   const number = Number(value) || 0;
 
-  return new Intl.NumberFormat("en-CA", {
-    style: "currency",
-    currency: "CAD",
-  }).format(number);
+  return number.toLocaleString(
+    "en-CA",
+    {
+      style: "currency",
+      currency: "CAD",
+      minimumFractionDigits: 2,
+    }
+  );
 }
 
-function numberOrZero(value) {
-  const number = Number(value);
+function number(value) {
+  const n = Number(value);
 
-  return Number.isFinite(number)
-    ? number
+  return Number.isFinite(n)
+    ? n
     : 0;
 }
 
-function parseDate(value) {
-  if (!value) return null;
+function formatDate(value) {
+  if (!value) return "—";
 
   const date = new Date(
-    `${value}T00:00:00`
+    `${value}T12:00:00`
   );
 
-  return Number.isNaN(date.getTime())
-    ? null
-    : date;
-}
-
-function formatDate(value) {
-  const date = parseDate(value);
-
-  if (!date) {
-    return "Not configured";
+  if (Number.isNaN(date.getTime())) {
+    return value;
   }
 
   return date.toLocaleDateString(
@@ -90,588 +121,367 @@ function formatDate(value) {
   );
 }
 
-/*
- * Used to display:
- *
- * Aug 1, 2026
- * Aug 2, 2026
- * Aug 3, 2026
- *
- * even if the user entered Aug 3 before Aug 1.
- */
-function sortShifts(shifts) {
-  return [...shifts].sort(
+function formatShortDate(value) {
+  if (!value) return "—";
+
+  const date = new Date(
+    `${value}T12:00:00`
+  );
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleDateString(
+    "en-CA",
+    {
+      month: "short",
+      day: "numeric",
+    }
+  );
+}
+
+function todayString() {
+  const now = new Date();
+
+  const year =
+    now.getFullYear();
+
+  const month = String(
+    now.getMonth() + 1
+  ).padStart(2, "0");
+
+  const day = String(
+    now.getDate()
+  ).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function createId(prefix = "id") {
+  return (
+    prefix +
+    "-" +
+    Date.now() +
+    "-" +
+    Math.random()
+      .toString(36)
+      .slice(2, 8)
+  );
+}
+
+/* =========================================================
+   SORT HOURS
+========================================================= */
+
+function sortHours(hours) {
+  return [...hours].sort(
     (a, b) => {
       const dateA =
         new Date(
-          `${a.date}T00:00:00`
+          `${a.date}T12:00:00`
         ).getTime();
 
       const dateB =
         new Date(
-          `${b.date}T00:00:00`
+          `${b.date}T12:00:00`
         ).getTime();
 
-      if (dateA !== dateB) {
-        return dateA - dateB;
-      }
-
-      /*
-       * If two shifts have the same date,
-       * sort them by start time.
-       */
-      return String(
-        a.start || ""
-      ).localeCompare(
-        String(b.start || "")
-      );
+      return dateA - dateB;
     }
   );
 }
 
-function calculateHours(
-  start,
-  end,
-  breakMinutes = 0
-) {
-  if (!start || !end) {
-    return 0;
-  }
-
-  const [
-    startHour,
-    startMinute,
-  ] = start
-    .split(":")
-    .map(Number);
-
-  const [
-    endHour,
-    endMinute,
-  ] = end
-    .split(":")
-    .map(Number);
-
-  let startTotal =
-    startHour * 60 +
-    startMinute;
-
-  let endTotal =
-    endHour * 60 +
-    endMinute;
-
-  /*
-   * Supports overnight shifts.
-   *
-   * Example:
-   * 10:00 PM → 2:00 AM
-   */
-  if (endTotal <= startTotal) {
-    endTotal += 24 * 60;
-  }
-
-  const totalMinutes =
-    endTotal -
-    startTotal -
-    numberOrZero(
-      breakMinutes
-    );
-
-  return Math.max(
-    0,
-    totalMinutes / 60
-  );
-}
-
-function loadJSON(
-  key,
-  fallback
-) {
-  try {
-    const raw =
-      localStorage.getItem(key);
-
-    if (!raw) {
-      return fallback;
-    }
-
-    const parsed =
-      JSON.parse(raw);
-
-    return parsed ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function saveJSON(
-  key,
-  value
-) {
-  try {
-    localStorage.setItem(
-      key,
-      JSON.stringify(value)
-    );
-  } catch {
-    // Ignore storage errors.
-  }
-}
-
 /* =========================================================
-   DEFAULT JOBS
+   NORMALIZE OLD DATA
 ========================================================= */
 
-const DEFAULT_JOBS = [
-  {
-    id: "zai_aw",
-    owner: "Zai",
-    employer: "A&W",
-    position: "Cashier/Kitchen",
-    hourlyRate: 18,
-    type: "Hourly",
-
-    payPeriodStart:
-      "2026-08-01",
-
-    payPeriodEnd:
-      "2026-08-15",
-
-    payday:
-      "2026-08-21",
-
-    overtimeMultiplier: 1.5,
-    holidayMultiplier: 1.5,
-    nightMultiplier: 1,
-
-    active: true,
-  },
-
-  {
-    id: "zai_loblaws",
-    owner: "Zai",
-    employer: "Loblaws",
-    position: "",
-    hourlyRate: 17.6,
-    type: "Hourly",
-
-    payPeriodStart: "",
-    payPeriodEnd: "",
-    payday: "",
-
-    overtimeMultiplier: 1.5,
-    holidayMultiplier: 1.5,
-    nightMultiplier: 1,
-
-    active: true,
-  },
-
-  {
-    id: "ariel_witron",
-    owner: "Ariel",
-    employer: "Witron",
-    position: "Equipment Operator",
-    hourlyRate: 21,
-    type: "Hourly",
-
-    payPeriodStart:
-      "2026-08-17",
-
-    payPeriodEnd:
-      "2026-08-30",
-
-    payday:
-      "2026-09-04",
-
-    overtimeMultiplier: 1.5,
-    holidayMultiplier: 1.5,
-    nightMultiplier: 1,
-
-    active: true,
-  },
-];
-
-/* =========================================================
-   NORMALIZE JOB
-========================================================= */
-
-function normalizeJob(
-  job,
-  index = 0
-) {
+function normalizeJob(job) {
   return {
     id:
-      job?.id ||
-      makeId(`job${index}`),
+      job.id ||
+      createId("job"),
 
     owner:
-      job?.owner ||
-      job?.person ||
-      "",
+      job.owner ||
+      "Zai",
 
     employer:
-      job?.employer ||
-      job?.company ||
-      job?.name ||
-      "",
+      job.employer ||
+      job.company ||
+      "New Job",
 
     position:
-      job?.position ||
-      job?.role ||
+      job.position ||
+      job.role ||
       "",
 
-    hourlyRate:
-      numberOrZero(
-        job?.hourlyRate ??
-          job?.rate ??
-          job?.payRate
+    rate:
+      number(
+        job.rate ??
+        job.hourlyRate ??
+        0
       ),
 
     type:
-      job?.type ||
+      job.type ||
       "Hourly",
 
     payPeriodStart:
-      job?.payPeriodStart ||
-      job?.periodStart ||
+      job.payPeriodStart ||
       "",
 
     payPeriodEnd:
-      job?.payPeriodEnd ||
-      job?.periodEnd ||
+      job.payPeriodEnd ||
       "",
 
     payday:
-      job?.payday ||
-      job?.payDate ||
+      job.payday ||
       "",
 
-    overtimeMultiplier:
-      numberOrZero(
-        job?.overtimeMultiplier ||
-          1.5
-      ) || 1.5,
+    open:
+      Boolean(job.open),
 
-    holidayMultiplier:
-      numberOrZero(
-        job?.holidayMultiplier ||
-          1.5
-      ) || 1.5,
+    hours:
+      sortHours(
+        Array.isArray(job.hours)
+          ? job.hours.map(
+              (entry) => ({
+                id:
+                  entry.id ||
+                  createId("hour"),
 
-    nightMultiplier:
-      numberOrZero(
-        job?.nightMultiplier ||
-          1
-      ) || 1,
+                date:
+                  entry.date ||
+                  todayString(),
 
-    active:
-      job?.active !== false,
+                start:
+                  entry.start ||
+                  "",
+
+                end:
+                  entry.end ||
+                  "",
+
+                breakMinutes:
+                  number(
+                    entry.breakMinutes
+                  ),
+
+                regularHours:
+                  number(
+                    entry.regularHours ??
+                    entry.hours ??
+                    0
+                  ),
+
+                overtimeHours:
+                  number(
+                    entry.overtimeHours ??
+                    entry.otHours ??
+                    0
+                  ),
+
+                holidayHours:
+                  number(
+                    entry.holidayHours ??
+                    0
+                  ),
+
+                notes:
+                  entry.notes ||
+                  "",
+              })
+            )
+          : []
+      ),
   };
 }
 
 /* =========================================================
-   NORMALIZE HOURS
+   LOAD
 ========================================================= */
 
-function normalizeHours(hours) {
-  if (
-    !hours ||
-    typeof hours !== "object"
-  ) {
-    return {};
-  }
+function loadIncomeData() {
+  try {
+    const saved =
+      localStorage.getItem(
+        STORAGE_KEY
+      );
 
-  return hours;
+    if (!saved) {
+      return DEFAULT_JOBS;
+    }
+
+    const parsed =
+      JSON.parse(saved);
+
+    if (
+      Array.isArray(parsed) &&
+      parsed.length
+    ) {
+      return parsed.map(
+        normalizeJob
+      );
+    }
+
+    if (
+      parsed &&
+      Array.isArray(
+        parsed.jobs
+      )
+    ) {
+      return parsed.jobs.map(
+        normalizeJob
+      );
+    }
+
+    return DEFAULT_JOBS;
+  } catch (error) {
+    console.error(
+      "Unable to load income data:",
+      error
+    );
+
+    return DEFAULT_JOBS;
+  }
 }
 
 /* =========================================================
-   MAIN COMPONENT
+   COMPONENT
 ========================================================= */
 
 export default function Income({
   onNavigate,
 }) {
-  /* =======================================================
-     JOBS
-  ======================================================= */
-
   const [jobs, setJobs] =
-    useState(() => {
-      const saved =
-        loadJSON(
-          JOB_STORAGE_KEY,
-          null
-        );
+    useState(loadIncomeData);
 
-      if (
-        Array.isArray(saved) &&
-        saved.length
-      ) {
-        return saved.map(
-          normalizeJob
-        );
-      }
+  const [selectedJobId, setSelectedJobId] =
+    useState(null);
 
-      return DEFAULT_JOBS.map(
-        normalizeJob
-      );
-    });
+  const [showJobModal, setShowJobModal] =
+    useState(false);
 
-  /* =======================================================
-     HOURS
-  ======================================================= */
+  const [showHoursModal, setShowHoursModal] =
+    useState(false);
 
-  const [
-    hoursByJob,
-    setHoursByJob,
-  ] = useState(() =>
-    normalizeHours(
-      loadJSON(
-        HOURS_STORAGE_KEY,
-        {}
-      )
-    )
-  );
+  const [editingJob, setEditingJob] =
+    useState(null);
 
-  /* =======================================================
-     UI STATE
-  ======================================================= */
+  const [editingHours, setEditingHours] =
+    useState(null);
 
-  const [
-    openJobs,
-    setOpenJobs,
-  ] = useState({});
-
-  const [
-    selectedJobId,
-    setSelectedJobId,
-  ] = useState(null);
-
-  const [
-    showJobModal,
-    setShowJobModal,
-  ] = useState(false);
-
-  const [
-    showHoursModal,
-    setShowHoursModal,
-  ] = useState(false);
-
-  const [
-    editingJob,
-    setEditingJob,
-  ] = useState(null);
-
-  /*
-   * NEW:
-   *
-   * If this contains a shift ID,
-   * the hours modal is editing an
-   * existing shift.
-   *
-   * If null, it is adding a new shift.
-   */
-  const [
-    editingShiftId,
-    setEditingShiftId,
-  ] = useState(null);
-
-  /* =======================================================
-     HOURS FORM
-  ======================================================= */
-
-  const [
-    hoursForm,
-    setHoursForm,
-  ] = useState({
-    date: "",
-    start: "",
-    end: "",
-    breakMinutes: 30,
-    category: "regular",
-    holiday: false,
-    nightDifferential: 1,
-    note: "",
-  });
-
-  /* =======================================================
-     SAVE JOBS
-  ======================================================= */
+  /* -------------------------------------------------------
+     SAVE
+  ------------------------------------------------------- */
 
   useEffect(() => {
-    saveJSON(
-      JOB_STORAGE_KEY,
-      jobs
-    );
+    try {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify(jobs)
+      );
+    } catch (error) {
+      console.error(
+        "Unable to save income data:",
+        error
+      );
+    }
   }, [jobs]);
 
-  /* =======================================================
-     SAVE HOURS
-  ======================================================= */
+  /* -------------------------------------------------------
+     SELECTED JOB
+  ------------------------------------------------------- */
 
-  useEffect(() => {
-    saveJSON(
-      HOURS_STORAGE_KEY,
-      hoursByJob
-    );
-  }, [hoursByJob]);
+  const selectedJob =
+    jobs.find(
+      (job) =>
+        job.id === selectedJobId
+    ) || null;
 
-  /* =======================================================
-     GET HOURS FOR JOB
-  ======================================================= */
+  /* -------------------------------------------------------
+     TOTAL HOUSEHOLD GROSS
+  ------------------------------------------------------- */
 
-  function getJobHours(jobId) {
-    const shifts =
-      Array.isArray(
-        hoursByJob[jobId]
+  const householdGross =
+    useMemo(() => {
+      return jobs.reduce(
+        (total, job) => {
+          const gross =
+            job.hours.reduce(
+              (
+                subtotal,
+                entry
+              ) => {
+                const regular =
+                  number(
+                    entry.regularHours
+                  ) *
+                  number(job.rate);
+
+                const overtime =
+                  number(
+                    entry.overtimeHours
+                  ) *
+                  number(job.rate) *
+                  1.5;
+
+                const holiday =
+                  number(
+                    entry.holidayHours
+                  ) *
+                  number(job.rate) *
+                  2;
+
+                return (
+                  subtotal +
+                  regular +
+                  overtime +
+                  holiday
+                );
+              },
+              0
+            );
+
+          return total + gross;
+        },
+        0
+      );
+    }, [jobs]);
+
+  /* =========================================================
+     JOB ACTIONS
+  ========================================================= */
+
+  function handleOpenJob(jobId) {
+    setJobs((current) =>
+      current.map((job) =>
+        job.id === jobId
+          ? {
+              ...job,
+              open: !job.open,
+            }
+          : job
       )
-        ? hoursByJob[jobId]
-        : [];
-
-    /*
-     * ALWAYS return sorted hours.
-     *
-     * This means:
-     *
-     * Aug 1
-     * Aug 2
-     * Aug 3
-     *
-     * regardless of the order
-     * the user entered them.
-     */
-    return sortShifts(shifts);
-  }
-
-  /* =======================================================
-     OPEN / CLOSE JOB
-  ======================================================= */
-
-  function toggleJob(jobId) {
-    setOpenJobs(
-      (previous) => ({
-        ...previous,
-        [jobId]:
-          !previous[jobId],
-      })
     );
 
-    setSelectedJobId(
-      jobId
-    );
+    setSelectedJobId(jobId);
   }
 
-  /* =======================================================
-     NEW JOB
-  ======================================================= */
-
-  function handleNewJob() {
-    setEditingJob({
-      id: makeId("job"),
-
-      owner: "",
-      employer: "",
-      position: "",
-
-      hourlyRate: "",
-
-      type: "Hourly",
-
-      payPeriodStart: "",
-      payPeriodEnd: "",
-      payday: "",
-
-      overtimeMultiplier: 1.5,
-      holidayMultiplier: 1.5,
-      nightMultiplier: 1,
-
-      active: true,
-    });
-
-    setShowJobModal(
-      true
-    );
-  }
-
-  /* =======================================================
-     EDIT JOB
-  ======================================================= */
-
-  function handleEditJob(
-    job
-  ) {
+  function handleEditJob(job) {
     setEditingJob({
       ...job,
     });
 
-    setShowJobModal(
-      true
-    );
+    setShowJobModal(true);
   }
 
-  /* =======================================================
-     SAVE JOB
-  ======================================================= */
-
-  function handleSaveJob() {
-    if (
-      !editingJob ||
-      !editingJob.owner ||
-      !editingJob.employer
-    ) {
-      return;
-    }
-
-    const cleanedJob =
-      normalizeJob(
-        editingJob
-      );
-
-    setJobs(
-      (previous) => {
-        const exists =
-          previous.some(
-            (job) =>
-              job.id ===
-              cleanedJob.id
-          );
-
-        if (exists) {
-          return previous.map(
-            (job) =>
-              job.id ===
-              cleanedJob.id
-                ? cleanedJob
-                : job
-          );
-        }
-
-        return [
-          ...previous,
-          cleanedJob,
-        ];
-      }
-    );
-
-    setShowJobModal(
-      false
-    );
-
-    setEditingJob(null);
-  }
-
-  /* =======================================================
-     DELETE JOB
-  ======================================================= */
-
-  function handleDeleteJob(
-    jobId
-  ) {
+  function handleDeleteJob(jobId) {
     const job =
       jobs.find(
         (item) =>
-          item.id ===
-          jobId
+          item.id === jobId
       );
 
     if (!job) return;
@@ -681,480 +491,385 @@ export default function Income({
         `Delete ${job.owner} — ${job.employer}?`
       );
 
-    if (!confirmed) {
-      return;
-    }
+    if (!confirmed) return;
 
-    setJobs(
-      (previous) =>
-        previous.filter(
-          (item) =>
-            item.id !==
-            jobId
-        )
-    );
-
-    setHoursByJob(
-      (previous) => {
-        const copy = {
-          ...previous,
-        };
-
-        delete copy[jobId];
-
-        return copy;
-      }
-    );
-
-    setOpenJobs(
-      (previous) => {
-        const copy = {
-          ...previous,
-        };
-
-        delete copy[jobId];
-
-        return copy;
-      }
+    setJobs((current) =>
+      current.filter(
+        (item) =>
+          item.id !== jobId
+      )
     );
 
     if (
-      selectedJobId ===
-      jobId
+      selectedJobId === jobId
     ) {
-      setSelectedJobId(
-        null
-      );
+      setSelectedJobId(null);
     }
   }
 
-  /* =======================================================
+  /* =========================================================
+     SAVE JOB
+  ========================================================= */
+
+  function handleSaveJob(event) {
+    event.preventDefault();
+
+    if (!editingJob) return;
+
+    const cleanedJob = {
+      ...editingJob,
+
+      rate: number(
+        editingJob.rate
+      ),
+
+      hours: sortHours(
+        editingJob.hours || []
+      ),
+    };
+
+    const exists =
+      jobs.some(
+        (job) =>
+          job.id ===
+          cleanedJob.id
+      );
+
+    if (exists) {
+      setJobs((current) =>
+        current.map((job) =>
+          job.id ===
+          cleanedJob.id
+            ? cleanedJob
+            : job
+        )
+      );
+    } else {
+      setJobs((current) => [
+        ...current,
+        cleanedJob,
+      ]);
+    }
+
+    setShowJobModal(false);
+    setEditingJob(null);
+  }
+
+  /* =========================================================
+     NEW JOB
+  ========================================================= */
+
+  function handleNewJob() {
+    setEditingJob({
+      id: createId("job"),
+      owner: "Zai",
+      employer: "",
+      position: "",
+      rate: "",
+      type: "Hourly",
+      payPeriodStart: "",
+      payPeriodEnd: "",
+      payday: "",
+      open: true,
+      hours: [],
+    });
+
+    setShowJobModal(true);
+  }
+
+  /* =========================================================
      ADD HOURS
-  ======================================================= */
+  ========================================================= */
 
-  function handleOpenHours(
-    job
-  ) {
-    setSelectedJobId(
-      job.id
-    );
+  function handleAddHours(job) {
+    setSelectedJobId(job.id);
 
-    /*
-     * New entry.
-     */
-    setEditingShiftId(
-      null
-    );
+    setEditingHours({
+      id: createId("hour"),
+      jobId: job.id,
 
-    setHoursForm({
       date:
-        job.payPeriodStart ||
-        "",
+        job.hours.length > 0
+          ? getNextWorkDate(
+              job.hours
+            )
+          : job.payPeriodStart ||
+            todayString(),
 
       start: "",
       end: "",
-
       breakMinutes: 30,
 
-      category: "regular",
+      regularHours: "",
+      overtimeHours: "",
+      holidayHours: "",
 
-      holiday: false,
-
-      nightDifferential: 1,
-
-      note: "",
+      notes: "",
     });
 
-    setShowHoursModal(
-      true
-    );
+    setShowHoursModal(true);
   }
 
-  /* =======================================================
-     EDIT EXISTING HOURS
-  ======================================================= */
+  /* =========================================================
+     EDIT HOURS
+  ========================================================= */
 
-  function handleEditShift(
+  function handleEditHours(
     job,
-    shift
+    entry
   ) {
-    /*
-     * Remember exactly which shift
-     * we are editing.
-     */
-    setSelectedJobId(
-      job.id
-    );
+    setSelectedJobId(job.id);
 
-    setEditingShiftId(
-      shift.id
-    );
-
-    /*
-     * Load the saved values
-     * into the form.
-     */
-    setHoursForm({
-      date:
-        shift.date || "",
-
-      start:
-        shift.start || "",
-
-      end:
-        shift.end || "",
-
-      breakMinutes:
-        numberOrZero(
-          shift.breakMinutes
-        ),
-
-      category:
-        shift.category ||
-        "regular",
-
-      holiday:
-        Boolean(
-          shift.holiday
-        ),
-
-      nightDifferential:
-        numberOrZero(
-          shift.nightDifferential
-        ) || 1,
-
-      note:
-        shift.note || "",
+    setEditingHours({
+      ...entry,
+      jobId: job.id,
     });
 
-    setShowHoursModal(
-      true
+    setShowHoursModal(true);
+  }
+
+  /* =========================================================
+     DELETE HOURS
+  ========================================================= */
+
+  function handleDeleteHours(
+    job,
+    hourId
+  ) {
+    const confirmed =
+      window.confirm(
+        "Delete this work entry?"
+      );
+
+    if (!confirmed) return;
+
+    setJobs((current) =>
+      current.map((item) =>
+        item.id === job.id
+          ? {
+              ...item,
+              hours:
+                item.hours.filter(
+                  (hour) =>
+                    hour.id !==
+                    hourId
+                ),
+            }
+          : item
+      )
     );
   }
 
-  /* =======================================================
+  /* =========================================================
      SAVE HOURS
-  ======================================================= */
+  ========================================================= */
 
-  function handleSaveHours() {
-    if (!selectedJobId) {
-      return;
-    }
+  function handleSaveHours(event) {
+    event.preventDefault();
 
-    if (
-      !hoursForm.date ||
-      !hoursForm.start ||
-      !hoursForm.end
-    ) {
-      return;
-    }
+    if (!editingHours) return;
 
     const job =
       jobs.find(
         (item) =>
           item.id ===
-          selectedJobId
+          editingHours.jobId
       );
 
-    if (!job) {
+    if (!job) return;
+
+    const date =
+      editingHours.date;
+
+    if (!date) {
+      window.alert(
+        "Please select a work date."
+      );
+
       return;
     }
 
-    const calculatedHours =
-      calculateHours(
-        hoursForm.start,
-        hoursForm.end,
-        hoursForm.breakMinutes
+    /* Prevent two entries on same date
+       unless editing that exact entry. */
+
+    const duplicateDate =
+      job.hours.some(
+        (entry) =>
+          entry.date === date &&
+          entry.id !==
+            editingHours.id
       );
 
-    if (
-      calculatedHours <= 0
-    ) {
+    if (duplicateDate) {
+      window.alert(
+        "You already have work hours entered for this date. Please edit the existing entry instead."
+      );
+
       return;
     }
 
-    const shiftData = {
-      date:
-        hoursForm.date,
+    const updatedEntry = {
+      ...editingHours,
 
-      start:
-        hoursForm.start,
+      regularHours:
+        number(
+          editingHours.regularHours
+        ),
 
-      end:
-        hoursForm.end,
+      overtimeHours:
+        number(
+          editingHours.overtimeHours
+        ),
+
+      holidayHours:
+        number(
+          editingHours.holidayHours
+        ),
 
       breakMinutes:
-        numberOrZero(
-          hoursForm.breakMinutes
+        number(
+          editingHours.breakMinutes
         ),
-
-      hours:
-        calculatedHours,
-
-      category:
-        hoursForm.holiday
-          ? "holiday"
-          : hoursForm.category,
-
-      holiday:
-        Boolean(
-          hoursForm.holiday
-        ),
-
-      nightDifferential:
-        numberOrZero(
-          hoursForm.nightDifferential
-        ) || 1,
-
-      note:
-        hoursForm.note || "",
     };
 
-    /*
-     * =====================================================
-     * EDIT EXISTING SHIFT
-     * =====================================================
-     */
-
-    if (editingShiftId) {
-      setHoursByJob(
-        (previous) => {
-          const current =
-            Array.isArray(
-              previous[
-                selectedJobId
-              ]
-            )
-              ? previous[
-                  selectedJobId
-                ]
-              : [];
-
-          const updated =
-            current.map(
-              (shift) =>
-                shift.id ===
-                editingShiftId
-                  ? {
-                      ...shift,
-                      ...shiftData,
-                      updatedAt:
-                        new Date().toISOString(),
-                    }
-                  : shift
-            );
-
-          return {
-            ...previous,
-
-            /*
-             * Sort immediately after
-             * editing.
-             */
-            [selectedJobId]:
-              sortShifts(
-                updated
-              ),
-          };
+    setJobs((current) =>
+      current.map((item) => {
+        if (
+          item.id !==
+          editingHours.jobId
+        ) {
+          return item;
         }
-      );
-    } else {
-      /*
-       * ===================================================
-       * ADD NEW SHIFT
-       * ===================================================
-       */
 
-      const newShift = {
-        id: makeId(
-          "shift"
-        ),
-
-        ...shiftData,
-
-        createdAt:
-          new Date().toISOString(),
-      };
-
-      setHoursByJob(
-        (previous) => {
-          const current =
-            Array.isArray(
-              previous[
-                selectedJobId
-              ]
-            )
-              ? previous[
-                  selectedJobId
-                ]
-              : [];
-
-          const updated = [
-            ...current,
-            newShift,
-          ];
-
-          return {
-            ...previous,
-
-            /*
-             * Sort immediately after
-             * adding.
-             */
-            [selectedJobId]:
-              sortShifts(
-                updated
-              ),
-          };
-        }
-      );
-    }
-
-    /*
-     * Close modal.
-     */
-    setShowHoursModal(
-      false
-    );
-
-    /*
-     * Clear editing state.
-     */
-    setEditingShiftId(
-      null
-    );
-
-    setHoursForm({
-      date: "",
-      start: "",
-      end: "",
-      breakMinutes: 30,
-      category: "regular",
-      holiday: false,
-      nightDifferential: 1,
-      note: "",
-    });
-  }
-
-  /* =======================================================
-     DELETE SHIFT
-  ======================================================= */
-
-  function handleDeleteShift(
-    jobId,
-    shiftId
-  ) {
-    const confirmed =
-      window.confirm(
-        "Remove this work shift?"
-      );
-
-    if (!confirmed) {
-      return;
-    }
-
-    setHoursByJob(
-      (previous) => {
-        const current =
-          Array.isArray(
-            previous[jobId]
-          )
-            ? previous[jobId]
-            : [];
-
-        const updated =
-          current.filter(
-            (shift) =>
-              shift.id !==
-              shiftId
+        const exists =
+          item.hours.some(
+            (entry) =>
+              entry.id ===
+              updatedEntry.id
           );
+
+        const updatedHours =
+          exists
+            ? item.hours.map(
+                (entry) =>
+                  entry.id ===
+                  updatedEntry.id
+                    ? updatedEntry
+                    : entry
+              )
+            : [
+                ...item.hours,
+                updatedEntry,
+              ];
 
         return {
-          ...previous,
-
-          [jobId]:
-            sortShifts(
-              updated
+          ...item,
+          hours:
+            sortHours(
+              updatedHours
             ),
         };
-      }
+      })
     );
+
+    setShowHoursModal(false);
+    setEditingHours(null);
   }
 
-  /* =======================================================
-     PAYROLL
-  ======================================================= */
+  /* =========================================================
+     GET NEXT WORK DATE
+  ========================================================= */
 
-  function calculatePayroll(
-    job
+  function getNextWorkDate(
+    hours
   ) {
-    const shifts =
-      getJobHours(
-        job.id
+    if (!hours.length) {
+      return todayString();
+    }
+
+    const sorted =
+      sortHours(hours);
+
+    const last =
+      sorted[
+        sorted.length - 1
+      ];
+
+    if (!last?.date) {
+      return todayString();
+    }
+
+    const date =
+      new Date(
+        `${last.date}T12:00:00`
       );
 
-    let regularHours = 0;
-    let overtimeHours = 0;
-    let holidayHours = 0;
-
-    let regularPay = 0;
-    let overtimePay = 0;
-    let holidayPay = 0;
-
-    shifts.forEach(
-      (shift) => {
-        const hours =
-          numberOrZero(
-            shift.hours
-          );
-
-        const differential =
-          numberOrZero(
-            shift.nightDifferential
-          ) || 1;
-
-        if (
-          shift.category ===
-            "holiday" ||
-          shift.holiday
-        ) {
-          holidayHours +=
-            hours;
-
-          holidayPay +=
-            hours *
-            job.hourlyRate *
-            job.holidayMultiplier *
-            differential;
-
-          return;
-        }
-
-        if (
-          shift.category ===
-          "overtime"
-        ) {
-          overtimeHours +=
-            hours;
-
-          overtimePay +=
-            hours *
-            job.hourlyRate *
-            job.overtimeMultiplier *
-            differential;
-
-          return;
-        }
-
-        regularHours +=
-          hours;
-
-        regularPay +=
-          hours *
-          job.hourlyRate *
-          differential;
-      }
+    date.setDate(
+      date.getDate() + 1
     );
+
+    const year =
+      date.getFullYear();
+
+    const month = String(
+      date.getMonth() + 1
+    ).padStart(2, "0");
+
+    const day = String(
+      date.getDate()
+    ).padStart(2, "0");
+
+    return `${year}-${month}-${day}`;
+  }
+
+  /* =========================================================
+     CALCULATE JOB PAY
+  ========================================================= */
+
+  function calculateJob(job) {
+    const regularHours =
+      job.hours.reduce(
+        (total, entry) =>
+          total +
+          number(
+            entry.regularHours
+          ),
+        0
+      );
+
+    const overtimeHours =
+      job.hours.reduce(
+        (total, entry) =>
+          total +
+          number(
+            entry.overtimeHours
+          ),
+        0
+      );
+
+    const holidayHours =
+      job.hours.reduce(
+        (total, entry) =>
+          total +
+          number(
+            entry.holidayHours
+          ),
+        0
+      );
+
+    const regularPay =
+      regularHours *
+      number(job.rate);
+
+    const overtimePay =
+      overtimeHours *
+      number(job.rate) *
+      1.5;
+
+    const holidayPay =
+      holidayHours *
+      number(job.rate) *
+      2;
 
     const gross =
       regularPay +
@@ -1162,2090 +877,2065 @@ export default function Income({
       holidayPay;
 
     /*
-     * Estimated only.
-     * Actual payroll deductions
-     * may be different.
-     */
+      We intentionally keep estimated net conservative.
+      The actual payroll/tax calculation can be connected
+      to the payroll logic later.
+    */
+
     const estimatedNet =
-      gross * 0.8;
+      gross * 0.85;
 
     return {
       regularHours,
       overtimeHours,
       holidayHours,
-
-      regularPay,
-      overtimePay,
-      holidayPay,
-
       gross,
       estimatedNet,
     };
   }
 
-  /* =======================================================
-     HOUSEHOLD TOTAL
-  ======================================================= */
+  /* =========================================================
+     STYLES
+  ========================================================= */
 
-  const totalHouseholdGross =
-    useMemo(() => {
-      return jobs.reduce(
-        (total, job) =>
-          total +
-          calculatePayroll(
-            job
-          ).gross,
-        0
-      );
-    }, [
-      jobs,
-      hoursByJob,
-    ]);
+  const styles = {
+    page: {
+      minHeight:
+        "100vh",
+      background:
+        "var(--page-bg, #fff8fb)",
+      padding:
+        "28px 16px 120px",
+      boxSizing:
+        "border-box",
+      overflowX:
+        "hidden",
+    },
 
-  /* =======================================================
-     RENDER
-  ======================================================= */
+    container: {
+      width:
+        "100%",
+      maxWidth:
+        "900px",
+      margin:
+        "0 auto",
+    },
 
-  return (
-    <div
-      style={{
-        minHeight:
-          "100vh",
+    eyebrow: {
+      margin: "0 0 8px",
+      fontSize:
+        "13px",
+      fontWeight: 800,
+      letterSpacing:
+        "0.18em",
+      color:
+        "var(--primary, #9c6687)",
+      textTransform:
+        "uppercase",
+    },
 
-        background:
-          "var(--page-bg, #fff8fb)",
+    title: {
+      margin: "0",
+      fontSize:
+        "clamp(36px, 8vw, 58px)",
+      lineHeight:
+        "1.02",
+      fontWeight: 800,
+      letterSpacing:
+        "-0.04em",
+      color:
+        "#251a29",
+    },
 
-        color:
-          "var(--text-primary, #281927)",
+    subtitle: {
+      margin:
+        "12px 0 24px",
+      fontSize:
+        "16px",
+      lineHeight:
+        "1.5",
+      color:
+        "#9c718d",
+      maxWidth:
+        "700px",
+    },
 
-        paddingBottom:
-          "120px",
-      }}
-    >
-      {/* =================================================
-          HEADER
-      ================================================= */}
+    sectionCard: {
+      background:
+        "#ffffff",
+      border:
+        "1.5px solid #efd5e2",
+      borderRadius:
+        "22px",
+      padding:
+        "18px",
+      marginBottom:
+        "16px",
+      boxSizing:
+        "border-box",
+    },
 
+    sectionHeader: {
+      display:
+        "flex",
+      alignItems:
+        "center",
+      justifyContent:
+        "space-between",
+      gap: "12px",
+      marginBottom:
+        "14px",
+    },
+
+    sectionTitle: {
+      margin: 0,
+      fontSize:
+        "15px",
+      lineHeight:
+        "1.3",
+      fontWeight: 800,
+      letterSpacing:
+        "0.08em",
+      textTransform:
+        "uppercase",
+      color:
+        "#986b87",
+    },
+
+    primaryButton: {
+      border: "none",
+      borderRadius:
+        "14px",
+      background:
+        "#d9467e",
+      color:
+        "#ffffff",
+      fontSize:
+        "14px",
+      fontWeight: 800,
+      padding:
+        "12px 16px",
+      minHeight:
+        "44px",
+      cursor:
+        "pointer",
+      touchAction:
+        "manipulation",
+    },
+
+    secondaryButton: {
+      border:
+        "1.5px solid #eed5e1",
+      borderRadius:
+        "14px",
+      background:
+        "#ffffff",
+      color:
+        "#76576b",
+      fontSize:
+        "14px",
+      fontWeight: 800,
+      padding:
+        "11px 15px",
+      minHeight:
+        "44px",
+      cursor:
+        "pointer",
+      touchAction:
+        "manipulation",
+    },
+
+    dangerButton: {
+      border:
+        "none",
+      borderRadius:
+        "14px",
+      background:
+        "#fff0f5",
+      color:
+        "#c94c73",
+      fontSize:
+        "14px",
+      fontWeight: 800,
+      padding:
+        "11px 15px",
+      minHeight:
+        "44px",
+      cursor:
+        "pointer",
+      touchAction:
+        "manipulation",
+    },
+
+    jobCard: {
+      border:
+        "1.5px solid #efd8e3",
+      borderRadius:
+        "18px",
+      background:
+        "#ffffff",
+      marginBottom:
+        "10px",
+      overflow:
+        "hidden",
+    },
+
+    jobCardOpen: {
+      border:
+        "2px solid #dc5a8c",
+    },
+
+    jobSummary: {
+      padding:
+        "14px",
+    },
+
+    jobTop: {
+      display:
+        "flex",
+      alignItems:
+        "center",
+      justifyContent:
+        "space-between",
+      gap: "10px",
+    },
+
+    jobInfo: {
+      minWidth:
+        "0",
+      flex: 1,
+    },
+
+    jobName: {
+      margin: 0,
+      fontSize:
+        "19px",
+      lineHeight:
+        "1.2",
+      fontWeight: 800,
+      color:
+        "#261a2b",
+      overflow:
+        "hidden",
+      textOverflow:
+        "ellipsis",
+      whiteSpace:
+        "nowrap",
+    },
+
+    jobMeta: {
+      margin:
+        "4px 0 0",
+      fontSize:
+        "13px",
+      lineHeight:
+        "1.4",
+      color:
+        "#936d84",
+    },
+
+    openButton: {
+      flex:
+        "0 0 auto",
+      border:
+        "none",
+      borderRadius:
+        "13px",
+      background:
+        "#d94d83",
+      color:
+        "#ffffff",
+      fontSize:
+        "13px",
+      fontWeight:
+        800,
+      padding:
+        "11px 18px",
+      minWidth:
+        "88px",
+      minHeight:
+        "42px",
+      cursor:
+        "pointer",
+    },
+
+    closedOpenButton: {
+      background:
+        "#fff1f6",
+      color:
+        "#d13e77",
+    },
+
+    jobActions: {
+      display:
+        "grid",
+      gridTemplateColumns:
+        "1fr 1fr 1fr",
+      gap: "8px",
+      marginTop:
+        "12px",
+    },
+
+    smallButton: {
+      width:
+        "100%",
+      border:
+        "1.5px solid #eed5e1",
+      borderRadius:
+        "12px",
+      background:
+        "#ffffff",
+      color:
+        "#76576b",
+      fontSize:
+        "12px",
+      fontWeight:
+        800,
+      padding:
+        "10px 8px",
+      minHeight:
+        "40px",
+      cursor:
+        "pointer",
+    },
+
+    smallPrimary: {
+      background:
+        "#d94d83",
+      color:
+        "#ffffff",
+      border:
+        "1.5px solid #d94d83",
+    },
+
+    smallDanger: {
+      background:
+        "#fff1f5",
+      color:
+        "#c94c73",
+      border:
+        "1.5px solid transparent",
+    },
+
+    details: {
+      borderTop:
+        "1px solid #f0dce5",
+      padding:
+        "14px",
+      background:
+        "#fffafd",
+    },
+
+    scheduleBox: {
+      background:
+        "#fffaf0",
+      border:
+        "1.5px solid #f4dda8",
+      borderRadius:
+        "14px",
+      padding:
+        "12px",
+      marginBottom:
+        "12px",
+    },
+
+    scheduleTitle: {
+      margin:
+        "0 0 7px",
+      fontSize:
+        "12px",
+      fontWeight:
+        800,
+      letterSpacing:
+        "0.08em",
+      textTransform:
+        "uppercase",
+      color:
+        "#9b742b",
+    },
+
+    scheduleText: {
+      margin: 0,
+      fontSize:
+        "13px",
+      lineHeight:
+        "1.55",
+      color:
+        "#806846",
+    },
+
+    statGrid: {
+      display:
+        "grid",
+      gridTemplateColumns:
+        "repeat(3, minmax(0, 1fr))",
+      gap: "8px",
+      marginBottom:
+        "14px",
+    },
+
+    stat: {
+      background:
+        "#fff3f8",
+      borderRadius:
+        "13px",
+      padding:
+        "11px 8px",
+      minWidth:
+        "0",
+    },
+
+    statLabel: {
+      margin: 0,
+      fontSize:
+        "10px",
+      fontWeight:
+        700,
+      color:
+        "#a27091",
+      textTransform:
+        "uppercase",
+      letterSpacing:
+        "0.05em",
+    },
+
+    statValue: {
+      margin:
+        "4px 0 0",
+      fontSize:
+        "17px",
+      lineHeight:
+        "1.1",
+      fontWeight:
+        800,
+      color:
+        "#2c1c2c",
+      overflow:
+        "hidden",
+      textOverflow:
+        "ellipsis",
+    },
+
+    hoursTitle: {
+      margin:
+        "0 0 8px",
+      fontSize:
+        "13px",
+      fontWeight:
+        800,
+      letterSpacing:
+        "0.07em",
+      color:
+        "#986b87",
+      textTransform:
+        "uppercase",
+    },
+
+    hourRow: {
+      display:
+        "grid",
+      gridTemplateColumns:
+        "1fr auto",
+      gap: "10px",
+      alignItems:
+        "center",
+      padding:
+        "10px 0",
+      borderBottom:
+        "1px solid #f1dfe7",
+    },
+
+    hourDate: {
+      margin: 0,
+      fontSize:
+        "14px",
+      fontWeight:
+        800,
+      color:
+        "#30202f",
+    },
+
+    hourMeta: {
+      margin:
+        "3px 0 0",
+      fontSize:
+        "12px",
+      color:
+        "#9a708c",
+    },
+
+    hourActions: {
+      display:
+        "flex",
+      gap:
+        "6px",
+    },
+
+    tinyButton: {
+      border:
+        "1px solid #ead2df",
+      borderRadius:
+        "9px",
+      background:
+        "#ffffff",
+      color:
+        "#76576b",
+      padding:
+        "7px 9px",
+      fontSize:
+        "11px",
+      fontWeight:
+        800,
+      cursor:
+        "pointer",
+    },
+
+    estimateBox: {
+      marginTop:
+        "14px",
+      background:
+        "#f7fcf9",
+      border:
+        "1.5px solid #d4ecdf",
+      borderRadius:
+        "14px",
+      padding:
+        "13px",
+    },
+
+    estimateTitle: {
+      margin:
+        "0 0 10px",
+      fontSize:
+        "12px",
+      fontWeight:
+        800,
+      color:
+        "#4e8868",
+      textTransform:
+        "uppercase",
+      letterSpacing:
+        "0.07em",
+    },
+
+    estimateRow: {
+      display:
+        "flex",
+      justifyContent:
+        "space-between",
+      gap: "12px",
+      padding:
+        "4px 0",
+      fontSize:
+        "13px",
+      color:
+        "#3b2c36",
+    },
+
+    estimateTotal: {
+      borderTop:
+        "1px solid #d8eade",
+      marginTop:
+        "6px",
+      paddingTop:
+        "9px",
+      display:
+        "flex",
+      justifyContent:
+        "space-between",
+      fontSize:
+        "15px",
+      fontWeight:
+        800,
+      color:
+        "#3d7859",
+    },
+
+    modalOverlay: {
+      position:
+        "fixed",
+      inset: 0,
+      zIndex: 1000,
+      background:
+        "rgba(32, 20, 34, 0.45)",
+      display:
+        "flex",
+      alignItems:
+        "flex-end",
+      justifyContent:
+        "center",
+      padding:
+        "12px",
+      boxSizing:
+        "border-box",
+    },
+
+    modal: {
+      width:
+        "100%",
+      maxWidth:
+        "620px",
+      maxHeight:
+        "90vh",
+      overflowY:
+        "auto",
+      background:
+        "#ffffff",
+      borderRadius:
+        "24px",
+      padding:
+        "20px",
+      boxSizing:
+        "border-box",
+      boxShadow:
+        "0 20px 60px rgba(30,20,30,.25)",
+    },
+
+    modalTitle: {
+      margin:
+        "0 0 16px",
+      fontSize:
+        "22px",
+      fontWeight:
+        800,
+      color:
+        "#2b1c2b",
+    },
+
+    formGrid: {
+      display:
+        "grid",
+      gridTemplateColumns:
+        "1fr 1fr",
+      gap:
+        "12px",
+    },
+
+    field: {
+      display:
+        "flex",
+      flexDirection:
+        "column",
+      gap:
+        "6px",
+    },
+
+    fieldFull: {
+      gridColumn:
+        "1 / -1",
+    },
+
+    label: {
+      fontSize:
+        "12px",
+      fontWeight:
+        800,
+      color:
+        "#7e5b70",
+    },
+
+    input: {
+      width:
+        "100%",
+      boxSizing:
+        "border-box",
+      border:
+        "1.5px solid #ead2df",
+      borderRadius:
+        "12px",
+      padding:
+        "11px 12px",
+      fontSize:
+        "15px",
+      background:
+        "#fffafd",
+      color:
+        "#2c1d2c",
+      outline:
+        "none",
+    },
+
+    modalActions: {
+      display:
+        "flex",
+      gap:
+        "8px",
+      marginTop:
+        "18px",
+    },
+
+    modalActionButton: {
+      flex: 1,
+      minHeight:
+        "46px",
+    },
+
+    empty: {
+      textAlign:
+        "center",
+      padding:
+        "24px 12px",
+      color:
+        "#a07591",
+      fontSize:
+        "14px",
+    },
+  };
+
+  /* =========================================================
+     RENDER JOB
+  ========================================================= */
+
+  function renderJob(job) {
+    const payroll =
+      calculateJob(job);
+
+    const isOpen =
+      job.open;
+
+    const sortedHours =
+      sortHours(job.hours);
+
+    return (
       <div
+        key={job.id}
         style={{
-          padding:
-            "70px 29px 25px",
+          ...styles.jobCard,
+          ...(isOpen
+            ? styles.jobCardOpen
+            : {}),
         }}
       >
         <div
-          style={{
-            fontSize:
-              "15px",
-
-            fontWeight:
-              800,
-
-            letterSpacing:
-              "0.16em",
-
-            color:
-              "#9b6b8c",
-
-            marginBottom:
-              "15px",
-          }}
+          style={
+            styles.jobSummary
+          }
         >
-          SALARY
+          <div
+            style={
+              styles.jobTop
+            }
+          >
+            <div
+              style={
+                styles.jobInfo
+              }
+            >
+              <h3
+                style={
+                  styles.jobName
+                }
+              >
+                {job.owner} —{" "}
+                {job.employer ||
+                  "New Job"}
+              </h3>
+
+              <p
+                style={
+                  styles.jobMeta
+                }
+              >
+                {job.position
+                  ? `${job.position} · `
+                  : ""}
+                {money(job.rate)}
+                /hr
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() =>
+                handleOpenJob(
+                  job.id
+                )
+              }
+              style={{
+                ...styles.openButton,
+                ...(isOpen
+                  ? {}
+                  : styles.closedOpenButton),
+              }}
+            >
+              {isOpen
+                ? "Opened"
+                : "Open"}
+            </button>
+          </div>
+
+          {isOpen && (
+            <>
+              <div
+                style={
+                  styles.jobActions
+                }
+              >
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleAddHours(
+                      job
+                    )
+                  }
+                  style={{
+                    ...styles.smallButton,
+                    ...styles.smallPrimary,
+                  }}
+                >
+                  + Add Hours
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleEditJob(
+                      job
+                    )
+                  }
+                  style={
+                    styles.smallButton
+                  }
+                >
+                  ✏️ Edit Job
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleDeleteJob(
+                      job.id
+                    )
+                  }
+                  style={{
+                    ...styles.smallButton,
+                    ...styles.smallDanger,
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+
+              <div
+                style={
+                  styles.details
+                }
+              >
+                <div
+                  style={
+                    styles.scheduleBox
+                  }
+                >
+                  <p
+                    style={
+                      styles.scheduleTitle
+                    }
+                  >
+                    Pay Schedule
+                  </p>
+
+                  <p
+                    style={
+                      styles.scheduleText
+                    }
+                  >
+                    Pay period:{" "}
+                    <strong>
+                      {formatDate(
+                        job.payPeriodStart
+                      )}{" "}
+                      –{" "}
+                      {formatDate(
+                        job.payPeriodEnd
+                      )}
+                    </strong>
+                    <br />
+
+                    Payday:{" "}
+                    <strong
+                      style={{
+                        color:
+                          "#d43d78",
+                      }}
+                    >
+                      {formatDate(
+                        job.payday
+                      )}
+                    </strong>
+                  </p>
+                </div>
+
+                <div
+                  style={
+                    styles.statGrid
+                  }
+                >
+                  <div
+                    style={
+                      styles.stat
+                    }
+                  >
+                    <p
+                      style={
+                        styles.statLabel
+                      }
+                    >
+                      Hours
+                    </p>
+
+                    <p
+                      style={
+                        styles.statValue
+                      }
+                    >
+                      {(
+                        payroll.regularHours +
+                        payroll.overtimeHours +
+                        payroll.holidayHours
+                      ).toFixed(2)}
+                    </p>
+                  </div>
+
+                  <div
+                    style={
+                      styles.stat
+                    }
+                  >
+                    <p
+                      style={
+                        styles.statLabel
+                      }
+                    >
+                      Gross
+                    </p>
+
+                    <p
+                      style={
+                        styles.statValue
+                      }
+                    >
+                      {money(
+                        payroll.gross
+                      )}
+                    </p>
+                  </div>
+
+                  <div
+                    style={
+                      styles.stat
+                    }
+                  >
+                    <p
+                      style={
+                        styles.statLabel
+                      }
+                    >
+                      Est. Net
+                    </p>
+
+                    <p
+                      style={
+                        styles.statValue
+                      }
+                    >
+                      {money(
+                        payroll.estimatedNet
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                <h4
+                  style={
+                    styles.hoursTitle
+                  }
+                >
+                  Work Hours
+                </h4>
+
+                {sortedHours.length ===
+                0 ? (
+                  <div
+                    style={
+                      styles.empty
+                    }
+                  >
+                    No work hours
+                    entered for this
+                    pay period yet.
+                  </div>
+                ) : (
+                  sortedHours.map(
+                    (entry) => {
+                      const total =
+                        number(
+                          entry.regularHours
+                        ) +
+                        number(
+                          entry.overtimeHours
+                        ) +
+                        number(
+                          entry.holidayHours
+                        );
+
+                      return (
+                        <div
+                          key={
+                            entry.id
+                          }
+                          style={
+                            styles.hourRow
+                          }
+                        >
+                          <div>
+                            <p
+                              style={
+                                styles.hourDate
+                              }
+                            >
+                              {formatShortDate(
+                                entry.date
+                              )}
+                            </p>
+
+                            <p
+                              style={
+                                styles.hourMeta
+                              }
+                            >
+                              {total.toFixed(
+                                2
+                              )}{" "}
+                              hrs
+
+                              {entry.start &&
+                              entry.end
+                                ? ` · ${entry.start}–${entry.end}`
+                                : ""}
+
+                              {number(
+                                entry.overtimeHours
+                              ) >
+                              0
+                                ? ` · OT ${number(
+                                    entry.overtimeHours
+                                  ).toFixed(2)}`
+                                : ""}
+
+                              {number(
+                                entry.holidayHours
+                              ) >
+                              0
+                                ? ` · Holiday ${number(
+                                    entry.holidayHours
+                                  ).toFixed(2)}`
+                                : ""}
+                            </p>
+                          </div>
+
+                          <div
+                            style={
+                              styles.hourActions
+                            }
+                          >
+                            <button
+                              type="button"
+                              style={
+                                styles.tinyButton
+                              }
+                              onClick={() =>
+                                handleEditHours(
+                                  job,
+                                  entry
+                                )
+                              }
+                            >
+                              Edit
+                            </button>
+
+                            <button
+                              type="button"
+                              style={
+                                styles.tinyButton
+                              }
+                              onClick={() =>
+                                handleDeleteHours(
+                                  job,
+                                  entry.id
+                                )
+                              }
+                            >
+                              ×
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    }
+                  )
+                )}
+
+                <div
+                  style={
+                    styles.estimateBox
+                  }
+                >
+                  <p
+                    style={
+                      styles.estimateTitle
+                    }
+                  >
+                    Paycheck Estimate
+                  </p>
+
+                  <div
+                    style={
+                      styles.estimateRow
+                    }
+                  >
+                    <span>
+                      Regular
+                    </span>
+
+                    <strong>
+                      {payroll.regularHours.toFixed(
+                        2
+                      )}{" "}
+                      hrs ·{" "}
+                      {money(
+                        payroll.regularHours *
+                          job.rate
+                      )}
+                    </strong>
+                  </div>
+
+                  <div
+                    style={
+                      styles.estimateRow
+                    }
+                  >
+                    <span>
+                      Overtime
+                    </span>
+
+                    <strong>
+                      {payroll.overtimeHours.toFixed(
+                        2
+                      )}{" "}
+                      hrs ·{" "}
+                      {money(
+                        payroll.overtimeHours *
+                          job.rate *
+                          1.5
+                      )}
+                    </strong>
+                  </div>
+
+                  <div
+                    style={
+                      styles.estimateRow
+                    }
+                  >
+                    <span>
+                      Holiday
+                    </span>
+
+                    <strong>
+                      {money(
+                        payroll.holidayHours *
+                          job.rate *
+                          2
+                      )}
+                    </strong>
+                  </div>
+
+                  <div
+                    style={
+                      styles.estimateTotal
+                    }
+                  >
+                    <span>
+                      Estimated Gross
+                    </span>
+
+                    <span>
+                      {money(
+                        payroll.gross
+                      )}
+                    </span>
+                  </div>
+
+                  <div
+                    style={{
+                      ...styles.estimateTotal,
+                      borderTop:
+                        "none",
+                      marginTop:
+                        "0",
+                      paddingTop:
+                        "5px",
+                    }}
+                  >
+                    <span>
+                      Estimated Net
+                    </span>
+
+                    <span>
+                      {money(
+                        payroll.estimatedNet
+                      )}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </div>
+      </div>
+    );
+  }
+
+  /* =========================================================
+     PAGE
+  ========================================================= */
+
+  return (
+    <main
+      style={styles.page}
+    >
+      <div
+        style={styles.container}
+      >
+        <p
+          style={
+            styles.eyebrow
+          }
+        >
+          Salary
+        </p>
 
         <h1
-          style={{
-            margin: 0,
-
-            fontSize:
-              "46px",
-
-            lineHeight:
-              1.05,
-
-            fontWeight:
-              800,
-
-            letterSpacing:
-              "-0.04em",
-          }}
+          style={
+            styles.title
+          }
         >
           Income & Work Hours
         </h1>
 
         <p
-          style={{
-            margin:
-              "14px 0 0",
-
-            fontSize:
-              "19px",
-
-            lineHeight:
-              1.45,
-
-            color:
-              "#a47796",
-          }}
+          style={
+            styles.subtitle
+          }
         >
-          Enter work once. Budget Blossom
-          calculates the paycheck and keeps
-          expected and actual pay separate.
+          Enter work once. Budget
+          Blossom calculates the
+          paycheck and keeps expected
+          and actual pay separate.
         </p>
-      </div>
 
-      {/* =================================================
-          HOUSEHOLD INCOME SOURCES
-      ================================================= */}
+        {/* HOUSEHOLD INCOME */}
 
-      <section
-        style={{
-          margin:
-            "0 29px 25px",
-
-          background:
-            "#ffffff",
-
-          border:
-            "2px solid #f0dce6",
-
-          borderRadius:
-            "25px",
-
-          padding:
-            "28px 29px",
-        }}
-      >
-        <div
-          style={{
-            display:
-              "flex",
-
-            alignItems:
-              "center",
-
-            justifyContent:
-              "space-between",
-
-            gap:
-              "15px",
-
-            marginBottom:
-              "24px",
-          }}
+        <section
+          style={
+            styles.sectionCard
+          }
         >
-          <h2
-            style={{
-              margin: 0,
-
-              fontSize:
-                "18px",
-
-              letterSpacing:
-                "0.08em",
-
-              color:
-                "#976d8d",
-            }}
-          >
-            HOUSEHOLD INCOME SOURCES
-          </h2>
-
-          <button
-            type="button"
-            onClick={
-              handleNewJob
-            }
+          <div
             style={
-              primaryButton
+              styles.sectionHeader
             }
           >
-            + New Job
-          </button>
-        </div>
+            <h2
+              style={
+                styles.sectionTitle
+              }
+            >
+              Household Income Sources
+            </h2>
 
-        {jobs.length ===
-          0 && (
+            <button
+              type="button"
+              onClick={
+                handleNewJob
+              }
+              style={
+                styles.primaryButton
+              }
+            >
+              + New Job
+            </button>
+          </div>
+
+          {jobs.length === 0 ? (
+            <div
+              style={
+                styles.empty
+              }
+            >
+              No income sources
+              yet.
+            </div>
+          ) : (
+            jobs.map(renderJob)
+          )}
+        </section>
+
+        {/* HOUSEHOLD TOTAL */}
+
+        <section
+          style={
+            styles.sectionCard
+          }
+        >
+          <div
+            style={
+              styles.sectionHeader
+            }
+          >
+            <h2
+              style={
+                styles.sectionTitle
+              }
+            >
+              Current Household
+              Estimated Gross
+            </h2>
+          </div>
+
           <div
             style={{
-              padding:
-                "30px",
-
-              textAlign:
-                "center",
-
+              fontSize:
+                "28px",
+              fontWeight:
+                800,
               color:
-                "#9b7591",
+                "#2b1c2b",
             }}
           >
-            No jobs added yet.
+            {money(
+              householdGross
+            )}
           </div>
-        )}
 
-        {jobs.map(
-          (job) => {
-            const isOpen =
-              Boolean(
-                openJobs[
-                  job.id
-                ]
-              );
-
-            const payroll =
-              calculatePayroll(
-                job
-              );
-
-            const shifts =
-              getJobHours(
-                job.id
-              );
-
-            return (
-              <div
-                key={
-                  job.id
-                }
-                style={{
-                  marginBottom:
-                    "18px",
-
-                  border:
-                    isOpen
-                      ? "4px solid #df5c91"
-                      : "2px solid #f0dce6",
-
-                  borderRadius:
-                    "28px",
-
-                  padding:
-                    "28px",
-
-                  background:
-                    "#fff",
-                }}
-              >
-                {/* JOB HEADER */}
-
-                <div
-                  style={{
-                    display:
-                      "flex",
-
-                    justifyContent:
-                      "space-between",
-
-                    alignItems:
-                      "center",
-
-                    gap:
-                      "20px",
-                  }}
-                >
-                  <div
-                    style={{
-                      minWidth:
-                        0,
-                    }}
-                  >
-                    <h3
-                      style={{
-                        margin:
-                          "0 0 8px",
-
-                        fontSize:
-                          "30px",
-
-                        lineHeight:
-                          1.1,
-                      }}
-                    >
-                      {job.owner} —{" "}
-                      {
-                        job.employer
-                      }
-                    </h3>
-
-                    <div
-                      style={{
-                        fontSize:
-                          "18px",
-
-                        color:
-                          "#8e6680",
-                      }}
-                    >
-                      {job.position
-                        ? `${job.position} · `
-                        : ""}
-
-                      {money(
-                        job.hourlyRate
-                      )}
-                      /hr
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      toggleJob(
-                        job.id
-                      )
-                    }
-                    style={{
-                      ...primaryButton,
-
-                      minWidth:
-                        "145px",
-                    }}
-                  >
-                    {isOpen
-                      ? "Opened"
-                      : "Open"}
-                  </button>
-                </div>
-
-                {/* =================================================
-                    OPEN JOB
-                ================================================= */}
-
-                {isOpen && (
-                  <div
-                    style={{
-                      marginTop:
-                        "25px",
-                    }}
-                  >
-                    {/* BUTTONS */}
-
-                    <div
-                      style={{
-                        borderTop:
-                          "2px solid #f0dce6",
-
-                        paddingTop:
-                          "25px",
-
-                        display:
-                          "flex",
-
-                        gap:
-                          "15px",
-
-                        flexWrap:
-                          "wrap",
-                      }}
-                    >
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleOpenHours(
-                            job
-                          )
-                        }
-                        style={{
-                          ...primaryButton,
-
-                          flex:
-                            "1 1 180px",
-                        }}
-                      >
-                        + Add Hours
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleEditJob(
-                            job
-                          )
-                        }
-                        style={{
-                          ...secondaryButton,
-
-                          flex:
-                            "1 1 180px",
-                        }}
-                      >
-                        ✏️ Edit Job
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleDeleteJob(
-                            job.id
-                          )
-                        }
-                        style={{
-                          ...deleteButton,
-
-                          flex:
-                            "1 1 180px",
-                        }}
-                      >
-                        Delete Job
-                      </button>
-                    </div>
-
-                    {/* =================================================
-                        PAY SCHEDULE
-                    ================================================= */}
-
-                    <div
-                      style={{
-                        marginTop:
-                          "25px",
-
-                        padding:
-                          "25px",
-
-                        border:
-                          "2px solid #f3dda8",
-
-                        background:
-                          "#fffaf0",
-
-                        borderRadius:
-                          "22px",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontWeight:
-                            800,
-
-                          color:
-                            "#97742f",
-
-                          fontSize:
-                            "17px",
-
-                          letterSpacing:
-                            "0.08em",
-
-                          marginBottom:
-                            "15px",
-                        }}
-                      >
-                        PAY SCHEDULE
-                      </div>
-
-                      <div
-                        style={{
-                          fontSize:
-                            "18px",
-
-                          lineHeight:
-                            1.7,
-
-                          color:
-                            "#806a48",
-                        }}
-                      >
-                        {job.payPeriodStart &&
-                        job.payPeriodEnd ? (
-                          <>
-                            Pay period:{" "}
-                            <strong>
-                              {formatDate(
-                                job.payPeriodStart
-                              )}{" "}
-                              –{" "}
-                              {formatDate(
-                                job.payPeriodEnd
-                              )}
-                            </strong>
-
-                            <br />
-
-                            Payday:{" "}
-                            <strong
-                              style={{
-                                color:
-                                  "#d62e72",
-                              }}
-                            >
-                              {formatDate(
-                                job.payday
-                              )}
-                            </strong>
-                          </>
-                        ) : (
-                          <>
-                            ⚠️ Pay schedule needs
-                            to be configured.
-                            <br />
-
-                            Tap{" "}
-                            <strong>
-                              Edit Job
-                            </strong>{" "}
-                            and enter the pay-period
-                            start, end, and payday.
-                          </>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* =================================================
-                        SUMMARY
-                    ================================================= */}
-
-                    <div
-                      style={{
-                        display:
-                          "grid",
-
-                        gridTemplateColumns:
-                          "repeat(3, minmax(0, 1fr))",
-
-                        gap:
-                          "15px",
-
-                        marginTop:
-                          "25px",
-                      }}
-                    >
-                      <SummaryBox
-                        label="HOURS"
-                        value={(
-                          payroll.regularHours +
-                          payroll.overtimeHours +
-                          payroll.holidayHours
-                        ).toFixed(
-                          2
-                        )}
-                      />
-
-                      <SummaryBox
-                        label="GROSS"
-                        value={money(
-                          payroll.gross
-                        )}
-                      />
-
-                      <SummaryBox
-                        label="EST. NET"
-                        value={money(
-                          payroll.estimatedNet
-                        )}
-                      />
-                    </div>
-
-                    {/* =================================================
-                        WORK HOURS
-                    ================================================= */}
-
-                    <div
-                      style={{
-                        marginTop:
-                          "28px",
-                      }}
-                    >
-                      <div
-                        style={{
-                          display:
-                            "flex",
-
-                          justifyContent:
-                            "space-between",
-
-                          alignItems:
-                            "center",
-
-                          marginBottom:
-                            "15px",
-                        }}
-                      >
-                        <h4
-                          style={{
-                            margin: 0,
-
-                            fontSize:
-                              "18px",
-
-                            letterSpacing:
-                              "0.08em",
-
-                            color:
-                              "#976d8d",
-                          }}
-                        >
-                          WORK HOURS
-                        </h4>
-
-                        {shifts.length >
-                          0 && (
-                          <span
-                            style={{
-                              fontSize:
-                                "14px",
-
-                              color:
-                                "#a47796",
-                            }}
-                          >
-                            {shifts.length}{" "}
-                            {shifts.length ===
-                            1
-                              ? "shift"
-                              : "shifts"}
-                          </span>
-                        )}
-                      </div>
-
-                      {shifts.length ===
-                      0 ? (
-                        <div
-                          style={{
-                            background:
-                              "#fff5f9",
-
-                            borderRadius:
-                              "20px",
-
-                            padding:
-                              "24px",
-
-                            textAlign:
-                              "center",
-
-                            color:
-                              "#a47796",
-
-                            fontSize:
-                              "17px",
-                          }}
-                        >
-                          No work hours entered
-                          for this pay period yet.
-                        </div>
-                      ) : (
-                        <div>
-                          {/*
-                           * IMPORTANT:
-                           *
-                           * getJobHours()
-                           * already sorts the
-                           * shifts by date.
-                           *
-                           * So even if the user
-                           * enters:
-                           *
-                           * Aug 4
-                           * Aug 1
-                           * Aug 3
-                           * Aug 2
-                           *
-                           * it displays:
-                           *
-                           * Aug 1
-                           * Aug 2
-                           * Aug 3
-                           * Aug 4
-                           */}
-
-                          {shifts.map(
-                            (
-                              shift,
-                              index
-                            ) => (
-                              <div
-                                key={
-                                  shift.id
-                                }
-                                style={{
-                                  background:
-                                    "#fff7fa",
-
-                                  border:
-                                    "1px solid #f0dce6",
-
-                                  borderRadius:
-                                    "18px",
-
-                                  padding:
-                                    "18px",
-
-                                  marginBottom:
-                                    "12px",
-                                }}
-                              >
-                                {/* DATE / SHIFT */}
-
-                                <div
-                                  style={{
-                                    display:
-                                      "flex",
-
-                                    justifyContent:
-                                      "space-between",
-
-                                    alignItems:
-                                      "flex-start",
-
-                                    gap:
-                                      "15px",
-                                  }}
-                                >
-                                  <div>
-                                    <div
-                                      style={{
-                                        fontWeight:
-                                          800,
-
-                                        fontSize:
-                                          "18px",
-
-                                        color:
-                                          "#352534",
-                                      }}
-                                    >
-                                      {formatDate(
-                                        shift.date
-                                      )}
-                                    </div>
-
-                                    <div
-                                      style={{
-                                        marginTop:
-                                          "6px",
-
-                                        color:
-                                          "#8e6680",
-
-                                        fontSize:
-                                          "16px",
-                                      }}
-                                    >
-                                      {shift.start}{" "}
-                                      –{" "}
-                                      {shift.end}
-                                    </div>
-
-                                    <div
-                                      style={{
-                                        marginTop:
-                                          "5px",
-
-                                        color:
-                                          "#a47796",
-
-                                        fontSize:
-                                          "15px",
-                                      }}
-                                    >
-                                      {Number(
-                                        shift.hours
-                                      ).toFixed(
-                                        2
-                                      )}{" "}
-                                      hrs
-                                      {" · "}
-                                      {shift.category ===
-                                      "holiday"
-                                        ? "Holiday"
-                                        : shift.category ===
-                                          "overtime"
-                                        ? "Overtime"
-                                        : "Regular"}
-                                    </div>
-
-                                    {shift.note && (
-                                      <div
-                                        style={{
-                                          marginTop:
-                                            "6px",
-
-                                          color:
-                                            "#8e6680",
-
-                                          fontSize:
-                                            "14px",
-
-                                          fontStyle:
-                                            "italic",
-                                        }}
-                                      >
-                                        {shift.note}
-                                      </div>
-                                    )}
-                                  </div>
-
-                                  {/* EDIT / DELETE */}
-
-                                  <div
-                                    style={{
-                                      display:
-                                        "flex",
-
-                                      gap:
-                                        "8px",
-
-                                      flexShrink:
-                                        0,
-                                    }}
-                                  >
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        handleEditShift(
-                                          job,
-                                          shift
-                                        )
-                                      }
-                                      style={{
-                                        ...smallEditButton,
-                                      }}
-                                    >
-                                      ✏️ Edit
-                                    </button>
-
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        handleDeleteShift(
-                                          job.id,
-                                          shift.id
-                                        )
-                                      }
-                                      style={{
-                                        ...smallDeleteButton,
-                                      }}
-                                    >
-                                      Remove
-                                    </button>
-                                  </div>
-                                </div>
-
-                                {/* DAY NUMBER */}
-
-                                <div
-                                  style={{
-                                    marginTop:
-                                      "12px",
-
-                                    paddingTop:
-                                      "10px",
-
-                                    borderTop:
-                                      "1px solid #f0dce6",
-
-                                    color:
-                                      "#b17b99",
-
-                                    fontSize:
-                                      "13px",
-                                  }}
-                                >
-                                  Shift{" "}
-                                  {index +
-                                    1}{" "}
-                                  ·{" "}
-                                  {formatDate(
-                                    shift.date
-                                  )}
-                                </div>
-                              </div>
-                            )
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* =================================================
-                        PAYCHECK ESTIMATE
-                    ================================================= */}
-
-                    <div
-                      style={{
-                        marginTop:
-                          "25px",
-
-                        padding:
-                          "25px",
-
-                        border:
-                          "2px solid #d7eddf",
-
-                        background:
-                          "#f5fbf7",
-
-                        borderRadius:
-                          "22px",
-                      }}
-                    >
-                      <h4
-                        style={{
-                          margin:
-                            "0 0 20px",
-
-                          color:
-                            "#4a8a66",
-
-                          fontSize:
-                            "17px",
-                        }}
-                      >
-                        PAYCHECK ESTIMATE
-                      </h4>
-
-                      <PayRow
-                        label="Regular"
-                        value={`${payroll.regularHours.toFixed(
-                          2
-                        )} hrs · ${money(
-                          payroll.regularPay
-                        )}`}
-                      />
-
-                      <PayRow
-                        label="Overtime"
-                        value={`${payroll.overtimeHours.toFixed(
-                          2
-                        )} hrs · ${money(
-                          payroll.overtimePay
-                        )}`}
-                      />
-
-                      <PayRow
-                        label="Holiday"
-                        value={money(
-                          payroll.holidayPay
-                        )}
-                      />
-
-                      <div
-                        style={{
-                          borderTop:
-                            "2px solid #d7eddf",
-
-                          marginTop:
-                            "12px",
-
-                          paddingTop:
-                            "15px",
-                        }}
-                      >
-                        <PayRow
-                          label="Estimated Gross"
-                          value={money(
-                            payroll.gross
-                          )}
-                          strong
-                        />
-
-                        <PayRow
-                          label="Estimated Net"
-                          value={money(
-                            payroll.estimatedNet
-                          )}
-                          strong
-                          green
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          }
-        )}
-      </section>
-
-      {/* =================================================
-          HOUSEHOLD TOTAL
-      ================================================= */}
-
-      <section
-        style={{
-          margin:
-            "0 29px 30px",
-
-          background:
-            "#fff",
-
-          border:
-            "2px solid #f0dce6",
-
-          borderRadius:
-            "24px",
-
-          padding:
-            "25px",
-        }}
-      >
-        <div
-          style={{
-            color:
-              "#976d8d",
-
-            fontSize:
-              "15px",
-
-            fontWeight:
-              800,
-
-            letterSpacing:
-              "0.08em",
-          }}
-        >
-          CURRENT HOUSEHOLD ESTIMATED GROSS
-        </div>
-
-        <div
-          style={{
-            marginTop:
-              "10px",
-
-            fontSize:
-              "32px",
-
-            fontWeight:
-              800,
-          }}
-        >
-          {money(
-            totalHouseholdGross
-          )}
-        </div>
-      </section>
-
-      {/* =================================================
+          <p
+            style={{
+              margin:
+                "5px 0 0",
+              fontSize:
+                "12px",
+              color:
+                "#9b718c",
+            }}
+          >
+            Based on saved work
+            hours.
+          </p>
+        </section>
+      </div>
+
+      {/* =====================================================
           JOB MODAL
-      ================================================= */}
+      ===================================================== */}
 
       {showJobModal &&
         editingJob && (
-          <Modal
-            title={
-              jobs.some(
-                (job) =>
-                  job.id ===
-                  editingJob.id
-              )
-                ? "Edit Job"
-                : "New Job / Employer"
+          <div
+            style={
+              styles.modalOverlay
             }
-            onClose={() => {
-              setShowJobModal(
-                false
-              );
-
-              setEditingJob(
-                null
-              );
+            onMouseDown={(event) => {
+              if (
+                event.target ===
+                event.currentTarget
+              ) {
+                setShowJobModal(
+                  false
+                );
+              }
             }}
           >
-            <Input
-              label="Owner"
-              value={
-                editingJob.owner
+            <form
+              style={
+                styles.modal
               }
-              onChange={(
-                value
-              ) =>
-                setEditingJob(
-                  (previous) => ({
-                    ...previous,
-                    owner: value,
-                  })
-                )
+              onSubmit={
+                handleSaveJob
               }
-              placeholder="Zai or Ariel"
-            />
-
-            <Input
-              label="Employer"
-              value={
-                editingJob.employer
-              }
-              onChange={(
-                value
-              ) =>
-                setEditingJob(
-                  (previous) => ({
-                    ...previous,
-                    employer:
-                      value,
-                  })
-                )
-              }
-              placeholder="A&W"
-            />
-
-            <Input
-              label="Position"
-              value={
-                editingJob.position
-              }
-              onChange={(
-                value
-              ) =>
-                setEditingJob(
-                  (previous) => ({
-                    ...previous,
-                    position:
-                      value,
-                  })
-                )
-              }
-              placeholder="Cashier / Kitchen"
-            />
-
-            <Input
-              label="Hourly Rate"
-              type="number"
-              step="0.01"
-              value={
-                editingJob.hourlyRate
-              }
-              onChange={(
-                value
-              ) =>
-                setEditingJob(
-                  (previous) => ({
-                    ...previous,
-                    hourlyRate:
-                      value,
-                  })
-                )
-              }
-              placeholder="18.00"
-            />
-
-            <div
-              style={{
-                marginTop:
-                  "20px",
-
-                fontWeight:
-                  800,
-
-                color:
-                  "#97742f",
-              }}
             >
-              PAY SCHEDULE
-            </div>
-
-            <Input
-              label="Pay Period Start"
-              type="date"
-              value={
-                editingJob.payPeriodStart
-              }
-              onChange={(
-                value
-              ) =>
-                setEditingJob(
-                  (previous) => ({
-                    ...previous,
-                    payPeriodStart:
-                      value,
-                  })
-                )
-              }
-            />
-
-            <Input
-              label="Pay Period End"
-              type="date"
-              value={
-                editingJob.payPeriodEnd
-              }
-              onChange={(
-                value
-              ) =>
-                setEditingJob(
-                  (previous) => ({
-                    ...previous,
-                    payPeriodEnd:
-                      value,
-                  })
-                )
-              }
-            />
-
-            <Input
-              label="Payday"
-              type="date"
-              value={
-                editingJob.payday
-              }
-              onChange={(
-                value
-              ) =>
-                setEditingJob(
-                  (previous) => ({
-                    ...previous,
-                    payday:
-                      value,
-                  })
-                )
-              }
-            />
-
-            <Input
-              label="Overtime Multiplier"
-              type="number"
-              step="0.1"
-              value={
-                editingJob.overtimeMultiplier
-              }
-              onChange={(
-                value
-              ) =>
-                setEditingJob(
-                  (previous) => ({
-                    ...previous,
-                    overtimeMultiplier:
-                      value,
-                  })
-                )
-              }
-            />
-
-            <Input
-              label="Holiday Multiplier"
-              type="number"
-              step="0.1"
-              value={
-                editingJob.holidayMultiplier
-              }
-              onChange={(
-                value
-              ) =>
-                setEditingJob(
-                  (previous) => ({
-                    ...previous,
-                    holidayMultiplier:
-                      value,
-                  })
-                )
-              }
-            />
-
-            <div
-              style={{
-                display:
-                  "flex",
-
-                gap:
-                  "12px",
-
-                marginTop:
-                  "25px",
-              }}
-            >
-              <button
-                type="button"
-                onClick={
-                  handleSaveJob
+              <h2
+                style={
+                  styles.modalTitle
                 }
-                style={{
-                  ...primaryButton,
-
-                  flex: 1,
-                }}
               >
-                Save Job
-              </button>
+                {editingJob.employer
+                  ? "Edit Job"
+                  : "New Job"}
+              </h2>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setShowJobModal(
-                    false
-                  );
-
-                  setEditingJob(
-                    null
-                  );
-                }}
-                style={{
-                  ...secondaryButton,
-
-                  flex: 1,
-                }}
+              <div
+                style={
+                  styles.formGrid
+                }
               >
-                Cancel
-              </button>
-            </div>
-          </Modal>
+                <label
+                  style={
+                    styles.field
+                  }
+                >
+                  <span
+                    style={
+                      styles.label
+                    }
+                  >
+                    Owner
+                  </span>
+
+                  <select
+                    value={
+                      editingJob.owner
+                    }
+                    onChange={(e) =>
+                      setEditingJob(
+                        {
+                          ...editingJob,
+                          owner:
+                            e.target
+                              .value,
+                        }
+                      )
+                    }
+                    style={
+                      styles.input
+                    }
+                  >
+                    <option>
+                      Zai
+                    </option>
+
+                    <option>
+                      Ariel
+                    </option>
+                  </select>
+                </label>
+
+                <label
+                  style={
+                    styles.field
+                  }
+                >
+                  <span
+                    style={
+                      styles.label
+                    }
+                  >
+                    Employer
+                  </span>
+
+                  <input
+                    required
+                    value={
+                      editingJob.employer
+                    }
+                    onChange={(e) =>
+                      setEditingJob(
+                        {
+                          ...editingJob,
+                          employer:
+                            e.target
+                              .value,
+                        }
+                      )
+                    }
+                    style={
+                      styles.input
+                    }
+                    placeholder="Employer"
+                  />
+                </label>
+
+                <label
+                  style={
+                    styles.field
+                  }
+                >
+                  <span
+                    style={
+                      styles.label
+                    }
+                  >
+                    Position
+                  </span>
+
+                  <input
+                    value={
+                      editingJob.position
+                    }
+                    onChange={(e) =>
+                      setEditingJob(
+                        {
+                          ...editingJob,
+                          position:
+                            e.target
+                              .value,
+                        }
+                      )
+                    }
+                    style={
+                      styles.input
+                    }
+                    placeholder="Position"
+                  />
+                </label>
+
+                <label
+                  style={
+                    styles.field
+                  }
+                >
+                  <span
+                    style={
+                      styles.label
+                    }
+                  >
+                    Hourly Rate
+                  </span>
+
+                  <input
+                    required
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={
+                      editingJob.rate
+                    }
+                    onChange={(e) =>
+                      setEditingJob(
+                        {
+                          ...editingJob,
+                          rate:
+                            e.target
+                              .value,
+                        }
+                      )
+                    }
+                    style={
+                      styles.input
+                    }
+                  />
+                </label>
+
+                <label
+                  style={
+                    styles.field
+                  }
+                >
+                  <span
+                    style={
+                      styles.label
+                    }
+                  >
+                    Pay Period Start
+                  </span>
+
+                  <input
+                    type="date"
+                    value={
+                      editingJob.payPeriodStart
+                    }
+                    onChange={(e) =>
+                      setEditingJob(
+                        {
+                          ...editingJob,
+                          payPeriodStart:
+                            e.target
+                              .value,
+                        }
+                      )
+                    }
+                    style={
+                      styles.input
+                    }
+                  />
+                </label>
+
+                <label
+                  style={
+                    styles.field
+                  }
+                >
+                  <span
+                    style={
+                      styles.label
+                    }
+                  >
+                    Pay Period End
+                  </span>
+
+                  <input
+                    type="date"
+                    value={
+                      editingJob.payPeriodEnd
+                    }
+                    onChange={(e) =>
+                      setEditingJob(
+                        {
+                          ...editingJob,
+                          payPeriodEnd:
+                            e.target
+                              .value,
+                        }
+                      )
+                    }
+                    style={
+                      styles.input
+                    }
+                  />
+                </label>
+
+                <label
+                  style={{
+                    ...styles.field,
+                    ...styles.fieldFull,
+                  }}
+                >
+                  <span
+                    style={
+                      styles.label
+                    }
+                  >
+                    Payday
+                  </span>
+
+                  <input
+                    type="date"
+                    value={
+                      editingJob.payday
+                    }
+                    onChange={(e) =>
+                      setEditingJob(
+                        {
+                          ...editingJob,
+                          payday:
+                            e.target
+                              .value,
+                        }
+                      )
+                    }
+                    style={
+                      styles.input
+                    }
+                  />
+                </label>
+              </div>
+
+              <div
+                style={
+                  styles.modalActions
+                }
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowJobModal(
+                      false
+                    );
+                    setEditingJob(
+                      null
+                    );
+                  }}
+                  style={{
+                    ...styles.secondaryButton,
+                    ...styles.modalActionButton,
+                  }}
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  style={{
+                    ...styles.primaryButton,
+                    ...styles.modalActionButton,
+                  }}
+                >
+                  Save Job
+                </button>
+              </div>
+            </form>
+          </div>
         )}
 
-      {/* =================================================
+      {/* =====================================================
           HOURS MODAL
-      ================================================= */}
+      ===================================================== */}
 
-      {showHoursModal && (
-        <Modal
-          title={
-            editingShiftId
-              ? "Edit Work Hours"
-              : "Add Work Hours"
-          }
-          onClose={() => {
-            setShowHoursModal(
-              false
-            );
-
-            setEditingShiftId(
-              null
-            );
-          }}
-        >
-          <Input
-            label="Work Date"
-            type="date"
-            value={
-              hoursForm.date
-            }
-            onChange={(
-              value
-            ) =>
-              setHoursForm(
-                (previous) => ({
-                  ...previous,
-                  date: value,
-                })
-              )
-            }
-          />
-
+      {showHoursModal &&
+        editingHours && (
           <div
-            style={{
-              display:
-                "grid",
-
-              gridTemplateColumns:
-                "1fr 1fr",
-
-              gap:
-                "15px",
+            style={
+              styles.modalOverlay
+            }
+            onMouseDown={(event) => {
+              if (
+                event.target ===
+                event.currentTarget
+              ) {
+                setShowHoursModal(
+                  false
+                );
+              }
             }}
           >
-            <Input
-              label="Start"
-              type="time"
-              value={
-                hoursForm.start
-              }
-              onChange={(
-                value
-              ) =>
-                setHoursForm(
-                  (previous) => ({
-                    ...previous,
-                    start: value,
-                  })
-                )
-              }
-            />
-
-            <Input
-              label="End"
-              type="time"
-              value={
-                hoursForm.end
-              }
-              onChange={(
-                value
-              ) =>
-                setHoursForm(
-                  (previous) => ({
-                    ...previous,
-                    end: value,
-                  })
-                )
-              }
-            />
-          </div>
-
-          <Input
-            label="Unpaid Break (minutes)"
-            type="number"
-            value={
-              hoursForm.breakMinutes
-            }
-            onChange={(
-              value
-            ) =>
-              setHoursForm(
-                (previous) => ({
-                  ...previous,
-                  breakMinutes:
-                    value,
-                })
-              )
-            }
-          />
-
-          <label
-            style={{
-              display:
-                "block",
-
-              marginTop:
-                "18px",
-
-              fontWeight:
-                700,
-            }}
-          >
-            Pay Type
-
-            <select
-              value={
-                hoursForm.category
-              }
-              onChange={(
-                event
-              ) =>
-                setHoursForm(
-                  (previous) => ({
-                    ...previous,
-
-                    category:
-                      event.target
-                        .value,
-
-                    holiday:
-                      event.target
-                        .value ===
-                      "holiday",
-                  })
-                )
-              }
+            <form
               style={
-                selectStyle
+                styles.modal
+              }
+              onSubmit={
+                handleSaveHours
               }
             >
-              <option value="regular">
-                Regular
-              </option>
-
-              <option value="overtime">
-                Overtime
-              </option>
-
-              <option value="holiday">
-                Holiday
-              </option>
-            </select>
-          </label>
-
-          <Input
-            label="Night Differential Multiplier"
-            type="number"
-            step="0.1"
-            value={
-              hoursForm.nightDifferential
-            }
-            onChange={(
-              value
-            ) =>
-              setHoursForm(
-                (previous) => ({
-                  ...previous,
-
-                  nightDifferential:
-                    value,
-                })
-              )
-            }
-          />
-
-          <Input
-            label="Note"
-            value={
-              hoursForm.note
-            }
-            onChange={(
-              value
-            ) =>
-              setHoursForm(
-                (previous) => ({
-                  ...previous,
-                  note: value,
-                })
-              )
-            }
-            placeholder="Optional"
-          />
-
-          {/* CALCULATED HOURS */}
-
-          {hoursForm.start &&
-            hoursForm.end && (
-              <div
-                style={{
-                  marginTop:
-                    "20px",
-
-                  padding:
-                    "18px",
-
-                  background:
-                    "#fff5f9",
-
-                  borderRadius:
-                    "16px",
-
-                  color:
-                    "#8e6680",
-
-                  fontWeight:
-                    700,
-                }}
+              <h2
+                style={
+                  styles.modalTitle
+                }
               >
-                Calculated hours:{" "}
-                {calculateHours(
-                  hoursForm.start,
-                  hoursForm.end,
-                  hoursForm.breakMinutes
-                ).toFixed(
-                  2
-                )}
+                {editingHours.id &&
+                selectedJob?.hours.some(
+                  (entry) =>
+                    entry.id ===
+                    editingHours.id
+                )
+                  ? "Edit Work Hours"
+                  : "Add Work Hours"}
+              </h2>
+
+              <div
+                style={
+                  styles.formGrid
+                }
+              >
+                <label
+                  style={{
+                    ...styles.field,
+                    ...styles.fieldFull,
+                  }}
+                >
+                  <span
+                    style={
+                      styles.label
+                    }
+                  >
+                    Work Date
+                  </span>
+
+                  <input
+                    required
+                    type="date"
+                    value={
+                      editingHours.date
+                    }
+                    onChange={(e) =>
+                      setEditingHours(
+                        {
+                          ...editingHours,
+                          date:
+                            e.target
+                              .value,
+                        }
+                      )
+                    }
+                    style={
+                      styles.input
+                    }
+                  />
+                </label>
+
+                <label
+                  style={
+                    styles.field
+                  }
+                >
+                  <span
+                    style={
+                      styles.label
+                    }
+                  >
+                    Start Time
+                  </span>
+
+                  <input
+                    type="time"
+                    value={
+                      editingHours.start
+                    }
+                    onChange={(e) =>
+                      setEditingHours(
+                        {
+                          ...editingHours,
+                          start:
+                            e.target
+                              .value,
+                        }
+                      )
+                    }
+                    style={
+                      styles.input
+                    }
+                  />
+                </label>
+
+                <label
+                  style={
+                    styles.field
+                  }
+                >
+                  <span
+                    style={
+                      styles.label
+                    }
+                  >
+                    End Time
+                  </span>
+
+                  <input
+                    type="time"
+                    value={
+                      editingHours.end
+                    }
+                    onChange={(e) =>
+                      setEditingHours(
+                        {
+                          ...editingHours,
+                          end:
+                            e.target
+                              .value,
+                        }
+                      )
+                    }
+                    style={
+                      styles.input
+                    }
+                  />
+                </label>
+
+                <label
+                  style={
+                    styles.field
+                  }
+                >
+                  <span
+                    style={
+                      styles.label
+                    }
+                  >
+                    Break Minutes
+                  </span>
+
+                  <input
+                    type="number"
+                    min="0"
+                    value={
+                      editingHours.breakMinutes
+                    }
+                    onChange={(e) =>
+                      setEditingHours(
+                        {
+                          ...editingHours,
+                          breakMinutes:
+                            e.target
+                              .value,
+                        }
+                      )
+                    }
+                    style={
+                      styles.input
+                    }
+                  />
+                </label>
+
+                <label
+                  style={
+                    styles.field
+                  }
+                >
+                  <span
+                    style={
+                      styles.label
+                    }
+                  >
+                    Regular Hours
+                  </span>
+
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.25"
+                    value={
+                      editingHours.regularHours
+                    }
+                    onChange={(e) =>
+                      setEditingHours(
+                        {
+                          ...editingHours,
+                          regularHours:
+                            e.target
+                              .value,
+                        }
+                      )
+                    }
+                    style={
+                      styles.input
+                    }
+                    placeholder="0"
+                  />
+                </label>
+
+                <label
+                  style={
+                    styles.field
+                  }
+                >
+                  <span
+                    style={
+                      styles.label
+                    }
+                  >
+                    Overtime Hours
+                  </span>
+
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.25"
+                    value={
+                      editingHours.overtimeHours
+                    }
+                    onChange={(e) =>
+                      setEditingHours(
+                        {
+                          ...editingHours,
+                          overtimeHours:
+                            e.target
+                              .value,
+                        }
+                      )
+                    }
+                    style={
+                      styles.input
+                    }
+                    placeholder="0"
+                  />
+                </label>
+
+                <label
+                  style={{
+                    ...styles.field,
+                    ...styles.fieldFull,
+                  }}
+                >
+                  <span
+                    style={
+                      styles.label
+                    }
+                  >
+                    Holiday Hours
+                  </span>
+
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.25"
+                    value={
+                      editingHours.holidayHours
+                    }
+                    onChange={(e) =>
+                      setEditingHours(
+                        {
+                          ...editingHours,
+                          holidayHours:
+                            e.target
+                              .value,
+                        }
+                      )
+                    }
+                    style={
+                      styles.input
+                    }
+                    placeholder="0"
+                  />
+                </label>
+
+                <label
+                  style={{
+                    ...styles.field,
+                    ...styles.fieldFull,
+                  }}
+                >
+                  <span
+                    style={
+                      styles.label
+                    }
+                  >
+                    Notes
+                  </span>
+
+                  <input
+                    value={
+                      editingHours.notes
+                    }
+                    onChange={(e) =>
+                      setEditingHours(
+                        {
+                          ...editingHours,
+                          notes:
+                            e.target
+                              .value,
+                        }
+                      )
+                    }
+                    style={
+                      styles.input
+                    }
+                    placeholder="Optional"
+                  />
+                </label>
               </div>
-            )}
 
-          <button
-            type="button"
-            onClick={
-              handleSaveHours
-            }
-            style={{
-              ...primaryButton,
+              <div
+                style={
+                  styles.modalActions
+                }
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowHoursModal(
+                      false
+                    );
+                    setEditingHours(
+                      null
+                    );
+                  }}
+                  style={{
+                    ...styles.secondaryButton,
+                    ...styles.modalActionButton,
+                  }}
+                >
+                  Cancel
+                </button>
 
-              width:
-                "100%",
-
-              marginTop:
-                "25px",
-            }}
-          >
-            {editingShiftId
-              ? "Save Changes"
-              : "Save Hours"}
-          </button>
-        </Modal>
-      )}
-    </div>
+                <button
+                  type="submit"
+                  style={{
+                    ...styles.primaryButton,
+                    ...styles.modalActionButton,
+                  }}
+                >
+                  Save Hours
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+    </main>
   );
 }
-
-/* =========================================================
-   SUMMARY BOX
-========================================================= */
-
-function SummaryBox({
-  label,
-  value,
-}) {
-  return (
-    <div
-      style={{
-        background:
-          "#fff5f9",
-
-        borderRadius:
-          "18px",
-
-        padding:
-          "18px",
-      }}
-    >
-      <div
-        style={{
-          color:
-            "#a47796",
-
-          fontSize:
-            "14px",
-
-          marginBottom:
-            "7px",
-        }}
-      >
-        {label}
-      </div>
-
-      <div
-        style={{
-          fontSize:
-            "25px",
-
-          fontWeight:
-            800,
-        }}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
-
-/* =========================================================
-   PAY ROW
-========================================================= */
-
-function PayRow({
-  label,
-  value,
-  strong = false,
-  green = false,
-}) {
-  return (
-    <div
-      style={{
-        display:
-          "flex",
-
-        justifyContent:
-          "space-between",
-
-        gap:
-          "15px",
-
-        marginBottom:
-          "12px",
-
-        fontWeight:
-          strong ? 800 : 500,
-
-        color:
-          green
-            ? "#4a8a66"
-            : "#342734",
-
-        fontSize:
-          strong
-            ? "19px"
-            : "17px",
-      }}
-    >
-      <span>
-        {label}
-      </span>
-
-      <span>
-        {value}
-      </span>
-    </div>
-  );
-}
-
-/* =========================================================
-   INPUT
-========================================================= */
-
-function Input({
-  label,
-  value,
-  onChange,
-  type = "text",
-  placeholder,
-  step,
-}) {
-  return (
-    <label
-      style={{
-        display:
-          "block",
-
-        marginTop:
-          "16px",
-
-        fontWeight:
-          700,
-
-        color:
-          "#6f5366",
-      }}
-    >
-      {label}
-
-      <input
-        type={type}
-        value={
-          value ?? ""
-        }
-        onChange={(
-          event
-        ) =>
-          onChange(
-            event.target
-              .value
-          )
-        }
-        placeholder={
-          placeholder
-        }
-        step={step}
-        style={
-          inputStyle
-        }
-      />
-    </label>
-  );
-}
-
-/* =========================================================
-   MODAL
-========================================================= */
-
-function Modal({
-  title,
-  children,
-  onClose,
-}) {
-  return (
-    <div
-      onMouseDown={(
-        event
-      ) => {
-        if (
-          event.target ===
-          event.currentTarget
-        ) {
-          onClose();
-        }
-      }}
-      style={{
-        position:
-          "fixed",
-
-        inset: 0,
-
-        background:
-          "rgba(40,25,39,0.45)",
-
-        zIndex:
-          1000,
-
-        display:
-          "flex",
-
-        alignItems:
-          "center",
-
-        justifyContent:
-          "center",
-
-        padding:
-          "20px",
-
-        overflowY:
-          "auto",
-      }}
-    >
-      <div
-        style={{
-          width:
-            "min(560px, 100%)",
-
-          maxHeight:
-            "90vh",
-
-          overflowY:
-            "auto",
-
-          background:
-            "#fff",
-
-          borderRadius:
-            "28px",
-
-          padding:
-            "28px",
-
-          boxShadow:
-            "0 20px 60px rgba(40,25,39,0.25)",
-        }}
-      >
-        <div
-          style={{
-            display:
-              "flex",
-
-            alignItems:
-              "center",
-
-            justifyContent:
-              "space-between",
-
-            gap:
-              "15px",
-
-            marginBottom:
-              "10px",
-          }}
-        >
-          <h2
-            style={{
-              margin: 0,
-
-              fontSize:
-                "28px",
-            }}
-          >
-            {title}
-          </h2>
-
-          <button
-            type="button"
-            onClick={
-              onClose
-            }
-            style={{
-              border:
-                "none",
-
-              background:
-                "#fff2f7",
-
-              width:
-                "42px",
-
-              height:
-                "42px",
-
-              borderRadius:
-                "50%",
-
-              fontSize:
-                "20px",
-
-              cursor:
-                "pointer",
-            }}
-          >
-            ×
-          </button>
-        </div>
-
-        {children}
-      </div>
-    </div>
-  );
-}
-
-/* =========================================================
-   BUTTON STYLES
-========================================================= */
-
-const primaryButton = {
-  border:
-    "none",
-
-  background:
-    "#d94d86",
-
-  color:
-    "#fff",
-
-  borderRadius:
-    "17px",
-
-  padding:
-    "17px 24px",
-
-  fontSize:
-    "17px",
-
-  fontWeight:
-    800,
-
-  cursor:
-    "pointer",
-
-  touchAction:
-    "manipulation",
-};
-
-const secondaryButton = {
-  border:
-    "2px solid #f0dce6",
-
-  background:
-    "#fff",
-
-  color:
-    "#76566b",
-
-  borderRadius:
-    "17px",
-
-  padding:
-    "15px 22px",
-
-  fontSize:
-    "17px",
-
-  fontWeight:
-    800,
-
-  cursor:
-    "pointer",
-
-  touchAction:
-    "manipulation",
-};
-
-const deleteButton = {
-  border:
-    "none",
-
-  background:
-    "#fff0f5",
-
-  color:
-    "#c84d70",
-
-  borderRadius:
-    "17px",
-
-  padding:
-    "17px 22px",
-
-  fontSize:
-    "17px",
-
-  fontWeight:
-    800,
-
-  cursor:
-    "pointer",
-
-  touchAction:
-    "manipulation",
-};
-
-const smallEditButton = {
-  border:
-    "1px solid #ead5e0",
-
-  background:
-    "#fff",
-
-  color:
-    "#b83e72",
-
-  borderRadius:
-    "10px",
-
-  padding:
-    "9px 11px",
-
-  fontSize:
-    "13px",
-
-  fontWeight:
-    800,
-
-  cursor:
-    "pointer",
-
-  whiteSpace:
-    "nowrap",
-};
-
-const smallDeleteButton = {
-  border:
-    "none",
-
-  background:
-    "#fff0f5",
-
-  color:
-    "#c84d70",
-
-  borderRadius:
-    "10px",
-
-  padding:
-    "9px 11px",
-
-  fontSize:
-    "13px",
-
-  fontWeight:
-    700,
-
-  cursor:
-    "pointer",
-
-  whiteSpace:
-    "nowrap",
-};
-
-const inputStyle = {
-  display:
-    "block",
-
-  width:
-    "100%",
-
-  boxSizing:
-    "border-box",
-
-  marginTop:
-    "8px",
-
-  padding:
-    "15px 16px",
-
-  border:
-    "2px solid #ead5e0",
-
-  borderRadius:
-    "14px",
-
-  background:
-    "#fff",
-
-  color:
-    "#342734",
-
-  fontSize:
-    "17px",
-
-  outline:
-    "none",
-};
-
-const selectStyle = {
-  display:
-    "block",
-
-  width:
-    "100%",
-
-  boxSizing:
-    "border-box",
-
-  marginTop:
-    "8px",
-
-  padding:
-    "15px 16px",
-
-  border:
-    "2px solid #ead5e0",
-
-  borderRadius:
-    "14px",
-
-  background:
-    "#fff",
-
-  color:
-    "#342734",
-
-  fontSize:
-    "17px",
-};
