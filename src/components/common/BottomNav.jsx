@@ -8,6 +8,7 @@
  * Home → Dashboard
  * Income → Work Hours / Payroll / Paychecks
  * Expenses → Bills / Recurring Expenses
+ * Credit Cards → Credit Card Tracker
  * Calendar → Work shifts / Paydays / Bills / Notes / Reminders
  * Goals → Savings / Financial Goals
  * More → Additional features / Settings
@@ -30,6 +31,11 @@ const NAV_ITEMS = [
     id: "expenses",
     label: "Expenses",
     emoji: "🧾",
+  },
+  {
+    id: "cards",
+    label: "Credit Cards",
+    emoji: "💳",
   },
   {
     id: "calendar",
@@ -71,6 +77,7 @@ export default function BottomNav({
         paddingLeft: "env(safe-area-inset-left)",
         paddingRight: "env(safe-area-inset-right)",
         zIndex: 400,
+        overflowX: "auto",
       }}
     >
       {NAV_ITEMS.map((item) => {
@@ -89,8 +96,8 @@ export default function BottomNav({
               alignItems: "center",
               justifyContent: "center",
               gap: "3px",
-              flex: 1,
-              minWidth: 0,
+              flex: "1 1 0",
+              minWidth: "0",
               height: "64px",
               padding: "6px 2px 4px",
               border: "none",
@@ -102,19 +109,20 @@ export default function BottomNav({
               color: isActive
                 ? "var(--nav-active)"
                 : "var(--nav-inactive)",
-              fontSize: "9px",
+              fontSize: "8px",
               fontWeight: isActive
                 ? typography.bold
                 : typography.medium,
-              letterSpacing: "0.04em",
+              letterSpacing: "0.03em",
               textTransform: "uppercase",
               transition: `all ${transitions.base}`,
               touchAction: "manipulation",
+              whiteSpace: "nowrap",
             }}
           >
             <span
               style={{
-                fontSize: "20px",
+                fontSize: "19px",
                 lineHeight: 1,
                 transform: isActive
                   ? "scale(1.1)"
