@@ -7,7 +7,10 @@
  * Features:
  * - Multiple household income sources
  * - Open / close individual jobs
- * - Add work hours per job
+ * - Add work hours
+ * - Edit saved work hours
+ * - Delete saved work hours
+ * - Automatically sort work hours chronologically
  * - Edit job
  * - Delete job
  * - New job
@@ -25,8 +28,11 @@ import React, { useEffect, useMemo, useState } from "react";
    STORAGE
 ========================================================= */
 
-const JOB_STORAGE_KEY = "budgetBlossomIncomeJobs";
-const HOURS_STORAGE_KEY = "budgetBlossomWorkHours";
+const JOB_STORAGE_KEY =
+  "budgetBlossomIncomeJobs";
+
+const HOURS_STORAGE_KEY =
+  "budgetBlossomWorkHours";
 
 /* =========================================================
    HELPERS
@@ -50,47 +56,116 @@ function money(value) {
 function numberOrZero(value) {
   const number = Number(value);
 
-  return Number.isFinite(number) ? number : 0;
+  return Number.isFinite(number)
+    ? number
+    : 0;
 }
 
 function parseDate(value) {
   if (!value) return null;
 
-  const date = new Date(`${value}T00:00:00`);
+  const date = new Date(
+    `${value}T00:00:00`
+  );
 
-  return Number.isNaN(date.getTime()) ? null : date;
+  return Number.isNaN(date.getTime())
+    ? null
+    : date;
 }
 
 function formatDate(value) {
   const date = parseDate(value);
 
-  if (!date) return "Not configured";
+  if (!date) {
+    return "Not configured";
+  }
 
-  return date.toLocaleDateString("en-CA", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  return date.toLocaleDateString(
+    "en-CA",
+    {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }
+  );
 }
 
-function calculateHours(start, end, breakMinutes = 0) {
-  if (!start || !end) return 0;
+/*
+ * Used to display:
+ *
+ * Aug 1, 2026
+ * Aug 2, 2026
+ * Aug 3, 2026
+ *
+ * even if the user entered Aug 3 before Aug 1.
+ */
+function sortShifts(shifts) {
+  return [...shifts].sort(
+    (a, b) => {
+      const dateA =
+        new Date(
+          `${a.date}T00:00:00`
+        ).getTime();
 
-  const [startHour, startMinute] = start
+      const dateB =
+        new Date(
+          `${b.date}T00:00:00`
+        ).getTime();
+
+      if (dateA !== dateB) {
+        return dateA - dateB;
+      }
+
+      /*
+       * If two shifts have the same date,
+       * sort them by start time.
+       */
+      return String(
+        a.start || ""
+      ).localeCompare(
+        String(b.start || "")
+      );
+    }
+  );
+}
+
+function calculateHours(
+  start,
+  end,
+  breakMinutes = 0
+) {
+  if (!start || !end) {
+    return 0;
+  }
+
+  const [
+    startHour,
+    startMinute,
+  ] = start
     .split(":")
     .map(Number);
 
-  const [endHour, endMinute] = end
+  const [
+    endHour,
+    endMinute,
+  ] = end
     .split(":")
     .map(Number);
 
   let startTotal =
-    startHour * 60 + startMinute;
+    startHour * 60 +
+    startMinute;
 
   let endTotal =
-    endHour * 60 + endMinute;
+    endHour * 60 +
+    endMinute;
 
-  // Allows overnight shifts such as 10 PM → 2 AM
+  /*
+   * Supports overnight shifts.
+   *
+   * Example:
+   * 10:00 PM → 2:00 AM
+   */
   if (endTotal <= startTotal) {
     endTotal += 24 * 60;
   }
@@ -98,18 +173,30 @@ function calculateHours(start, end, breakMinutes = 0) {
   const totalMinutes =
     endTotal -
     startTotal -
-    numberOrZero(breakMinutes);
+    numberOrZero(
+      breakMinutes
+    );
 
-  return Math.max(0, totalMinutes / 60);
+  return Math.max(
+    0,
+    totalMinutes / 60
+  );
 }
 
-function loadJSON(key, fallback) {
+function loadJSON(
+  key,
+  fallback
+) {
   try {
-    const raw = localStorage.getItem(key);
+    const raw =
+      localStorage.getItem(key);
 
-    if (!raw) return fallback;
+    if (!raw) {
+      return fallback;
+    }
 
-    const parsed = JSON.parse(raw);
+    const parsed =
+      JSON.parse(raw);
 
     return parsed ?? fallback;
   } catch {
@@ -117,14 +204,17 @@ function loadJSON(key, fallback) {
   }
 }
 
-function saveJSON(key, value) {
+function saveJSON(
+  key,
+  value
+) {
   try {
     localStorage.setItem(
       key,
       JSON.stringify(value)
     );
   } catch {
-    // Ignore localStorage errors
+    // Ignore storage errors.
   }
 }
 
@@ -140,12 +230,20 @@ const DEFAULT_JOBS = [
     position: "Cashier/Kitchen",
     hourlyRate: 18,
     type: "Hourly",
-    payPeriodStart: "2026-08-01",
-    payPeriodEnd: "2026-08-15",
-    payday: "2026-08-21",
+
+    payPeriodStart:
+      "2026-08-01",
+
+    payPeriodEnd:
+      "2026-08-15",
+
+    payday:
+      "2026-08-21",
+
     overtimeMultiplier: 1.5,
     holidayMultiplier: 1.5,
     nightMultiplier: 1,
+
     active: true,
   },
 
@@ -156,12 +254,15 @@ const DEFAULT_JOBS = [
     position: "",
     hourlyRate: 17.6,
     type: "Hourly",
+
     payPeriodStart: "",
     payPeriodEnd: "",
     payday: "",
+
     overtimeMultiplier: 1.5,
     holidayMultiplier: 1.5,
     nightMultiplier: 1,
+
     active: true,
   },
 
@@ -172,12 +273,20 @@ const DEFAULT_JOBS = [
     position: "Equipment Operator",
     hourlyRate: 21,
     type: "Hourly",
-    payPeriodStart: "2026-08-17",
-    payPeriodEnd: "2026-08-30",
-    payday: "2026-09-04",
+
+    payPeriodStart:
+      "2026-08-17",
+
+    payPeriodEnd:
+      "2026-08-30",
+
+    payday:
+      "2026-09-04",
+
     overtimeMultiplier: 1.5,
     holidayMultiplier: 1.5,
     nightMultiplier: 1,
+
     active: true,
   },
 ];
@@ -186,7 +295,10 @@ const DEFAULT_JOBS = [
    NORMALIZE JOB
 ========================================================= */
 
-function normalizeJob(job, index = 0) {
+function normalizeJob(
+  job,
+  index = 0
+) {
   return {
     id:
       job?.id ||
@@ -236,17 +348,20 @@ function normalizeJob(job, index = 0) {
 
     overtimeMultiplier:
       numberOrZero(
-        job?.overtimeMultiplier || 1.5
+        job?.overtimeMultiplier ||
+          1.5
       ) || 1.5,
 
     holidayMultiplier:
       numberOrZero(
-        job?.holidayMultiplier || 1.5
+        job?.holidayMultiplier ||
+          1.5
       ) || 1.5,
 
     nightMultiplier:
       numberOrZero(
-        job?.nightMultiplier || 1
+        job?.nightMultiplier ||
+          1
       ) || 1,
 
     active:
@@ -259,7 +374,10 @@ function normalizeJob(job, index = 0) {
 ========================================================= */
 
 function normalizeHours(hours) {
-  if (!hours || typeof hours !== "object") {
+  if (
+    !hours ||
+    typeof hours !== "object"
+  ) {
     return {};
   }
 
@@ -267,65 +385,117 @@ function normalizeHours(hours) {
 }
 
 /* =========================================================
-   COMPONENT
+   MAIN COMPONENT
 ========================================================= */
 
 export default function Income({
   onNavigate,
 }) {
-  const [jobs, setJobs] = useState(() => {
-    const saved = loadJSON(
-      JOB_STORAGE_KEY,
-      null
-    );
+  /* =======================================================
+     JOBS
+  ======================================================= */
 
-    if (Array.isArray(saved) && saved.length) {
-      return saved.map(normalizeJob);
-    }
-
-    return DEFAULT_JOBS.map(normalizeJob);
-  });
-
-  const [hoursByJob, setHoursByJob] =
-    useState(() =>
-      normalizeHours(
+  const [jobs, setJobs] =
+    useState(() => {
+      const saved =
         loadJSON(
-          HOURS_STORAGE_KEY,
-          {}
-        )
-      )
-    );
+          JOB_STORAGE_KEY,
+          null
+        );
 
-  const [openJobs, setOpenJobs] = useState(
-    {}
-  );
+      if (
+        Array.isArray(saved) &&
+        saved.length
+      ) {
+        return saved.map(
+          normalizeJob
+        );
+      }
 
-  const [selectedJobId, setSelectedJobId] =
-    useState(null);
-
-  const [showJobModal, setShowJobModal] =
-    useState(false);
-
-  const [showHoursModal, setShowHoursModal] =
-    useState(false);
-
-  const [editingJob, setEditingJob] =
-    useState(null);
-
-  const [hoursForm, setHoursForm] =
-    useState({
-      date: "",
-      start: "",
-      end: "",
-      breakMinutes: 30,
-      category: "regular",
-      holiday: false,
-      nightDifferential: 1,
-      note: "",
+      return DEFAULT_JOBS.map(
+        normalizeJob
+      );
     });
 
   /* =======================================================
-     PERSIST JOBS
+     HOURS
+  ======================================================= */
+
+  const [
+    hoursByJob,
+    setHoursByJob,
+  ] = useState(() =>
+    normalizeHours(
+      loadJSON(
+        HOURS_STORAGE_KEY,
+        {}
+      )
+    )
+  );
+
+  /* =======================================================
+     UI STATE
+  ======================================================= */
+
+  const [
+    openJobs,
+    setOpenJobs,
+  ] = useState({});
+
+  const [
+    selectedJobId,
+    setSelectedJobId,
+  ] = useState(null);
+
+  const [
+    showJobModal,
+    setShowJobModal,
+  ] = useState(false);
+
+  const [
+    showHoursModal,
+    setShowHoursModal,
+  ] = useState(false);
+
+  const [
+    editingJob,
+    setEditingJob,
+  ] = useState(null);
+
+  /*
+   * NEW:
+   *
+   * If this contains a shift ID,
+   * the hours modal is editing an
+   * existing shift.
+   *
+   * If null, it is adding a new shift.
+   */
+  const [
+    editingShiftId,
+    setEditingShiftId,
+  ] = useState(null);
+
+  /* =======================================================
+     HOURS FORM
+  ======================================================= */
+
+  const [
+    hoursForm,
+    setHoursForm,
+  ] = useState({
+    date: "",
+    start: "",
+    end: "",
+    breakMinutes: 30,
+    category: "regular",
+    holiday: false,
+    nightDifferential: 1,
+    note: "",
+  });
+
+  /* =======================================================
+     SAVE JOBS
   ======================================================= */
 
   useEffect(() => {
@@ -336,7 +506,7 @@ export default function Income({
   }, [jobs]);
 
   /* =======================================================
-     PERSIST HOURS
+     SAVE HOURS
   ======================================================= */
 
   useEffect(() => {
@@ -347,15 +517,30 @@ export default function Income({
   }, [hoursByJob]);
 
   /* =======================================================
-     JOB KEY
+     GET HOURS FOR JOB
   ======================================================= */
 
   function getJobHours(jobId) {
-    return Array.isArray(
-      hoursByJob[jobId]
-    )
-      ? hoursByJob[jobId]
-      : [];
+    const shifts =
+      Array.isArray(
+        hoursByJob[jobId]
+      )
+        ? hoursByJob[jobId]
+        : [];
+
+    /*
+     * ALWAYS return sorted hours.
+     *
+     * This means:
+     *
+     * Aug 1
+     * Aug 2
+     * Aug 3
+     *
+     * regardless of the order
+     * the user entered them.
+     */
+    return sortShifts(shifts);
   }
 
   /* =======================================================
@@ -363,12 +548,17 @@ export default function Income({
   ======================================================= */
 
   function toggleJob(jobId) {
-    setOpenJobs((previous) => ({
-      ...previous,
-      [jobId]: !previous[jobId],
-    }));
+    setOpenJobs(
+      (previous) => ({
+        ...previous,
+        [jobId]:
+          !previous[jobId],
+      })
+    );
 
-    setSelectedJobId(jobId);
+    setSelectedJobId(
+      jobId
+    );
   }
 
   /* =======================================================
@@ -378,33 +568,45 @@ export default function Income({
   function handleNewJob() {
     setEditingJob({
       id: makeId("job"),
+
       owner: "",
       employer: "",
       position: "",
+
       hourlyRate: "",
+
       type: "Hourly",
+
       payPeriodStart: "",
       payPeriodEnd: "",
       payday: "",
+
       overtimeMultiplier: 1.5,
       holidayMultiplier: 1.5,
       nightMultiplier: 1,
+
       active: true,
     });
 
-    setShowJobModal(true);
+    setShowJobModal(
+      true
+    );
   }
 
   /* =======================================================
      EDIT JOB
   ======================================================= */
 
-  function handleEditJob(job) {
+  function handleEditJob(
+    job
+  ) {
     setEditingJob({
       ...job,
     });
 
-    setShowJobModal(true);
+    setShowJobModal(
+      true
+    );
   }
 
   /* =======================================================
@@ -421,30 +623,40 @@ export default function Income({
     }
 
     const cleanedJob =
-      normalizeJob(editingJob);
+      normalizeJob(
+        editingJob
+      );
 
-    setJobs((previous) => {
-      const exists =
-        previous.some(
-          (job) =>
-            job.id === cleanedJob.id
-        );
+    setJobs(
+      (previous) => {
+        const exists =
+          previous.some(
+            (job) =>
+              job.id ===
+              cleanedJob.id
+          );
 
-      if (exists) {
-        return previous.map((job) =>
-          job.id === cleanedJob.id
-            ? cleanedJob
-            : job
-        );
+        if (exists) {
+          return previous.map(
+            (job) =>
+              job.id ===
+              cleanedJob.id
+                ? cleanedJob
+                : job
+          );
+        }
+
+        return [
+          ...previous,
+          cleanedJob,
+        ];
       }
+    );
 
-      return [
-        ...previous,
-        cleanedJob,
-      ];
-    });
+    setShowJobModal(
+      false
+    );
 
-    setShowJobModal(false);
     setEditingJob(null);
   }
 
@@ -452,47 +664,67 @@ export default function Income({
      DELETE JOB
   ======================================================= */
 
-  function handleDeleteJob(jobId) {
-    const job = jobs.find(
-      (item) => item.id === jobId
-    );
+  function handleDeleteJob(
+    jobId
+  ) {
+    const job =
+      jobs.find(
+        (item) =>
+          item.id ===
+          jobId
+      );
 
     if (!job) return;
 
-    const confirmed = window.confirm(
-      `Delete ${job.owner} — ${job.employer}?`
+    const confirmed =
+      window.confirm(
+        `Delete ${job.owner} — ${job.employer}?`
+      );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setJobs(
+      (previous) =>
+        previous.filter(
+          (item) =>
+            item.id !==
+            jobId
+        )
     );
 
-    if (!confirmed) return;
+    setHoursByJob(
+      (previous) => {
+        const copy = {
+          ...previous,
+        };
 
-    setJobs((previous) =>
-      previous.filter(
-        (item) => item.id !== jobId
-      )
+        delete copy[jobId];
+
+        return copy;
+      }
     );
 
-    setHoursByJob((previous) => {
-      const copy = {
-        ...previous,
-      };
+    setOpenJobs(
+      (previous) => {
+        const copy = {
+          ...previous,
+        };
 
-      delete copy[jobId];
+        delete copy[jobId];
 
-      return copy;
-    });
+        return copy;
+      }
+    );
 
-    setOpenJobs((previous) => {
-      const copy = {
-        ...previous,
-      };
-
-      delete copy[jobId];
-
-      return copy;
-    });
-
-    if (selectedJobId === jobId) {
-      setSelectedJobId(null);
+    if (
+      selectedJobId ===
+      jobId
+    ) {
+      setSelectedJobId(
+        null
+      );
     }
   }
 
@@ -500,26 +732,104 @@ export default function Income({
      ADD HOURS
   ======================================================= */
 
-  function handleOpenHours(job) {
-    setSelectedJobId(job.id);
+  function handleOpenHours(
+    job
+  ) {
+    setSelectedJobId(
+      job.id
+    );
+
+    /*
+     * New entry.
+     */
+    setEditingShiftId(
+      null
+    );
 
     setHoursForm({
       date:
         job.payPeriodStart ||
-        new Date()
-          .toISOString()
-          .slice(0, 10),
+        "",
 
       start: "",
       end: "",
+
       breakMinutes: 30,
+
       category: "regular",
+
       holiday: false,
+
       nightDifferential: 1,
+
       note: "",
     });
 
-    setShowHoursModal(true);
+    setShowHoursModal(
+      true
+    );
+  }
+
+  /* =======================================================
+     EDIT EXISTING HOURS
+  ======================================================= */
+
+  function handleEditShift(
+    job,
+    shift
+  ) {
+    /*
+     * Remember exactly which shift
+     * we are editing.
+     */
+    setSelectedJobId(
+      job.id
+    );
+
+    setEditingShiftId(
+      shift.id
+    );
+
+    /*
+     * Load the saved values
+     * into the form.
+     */
+    setHoursForm({
+      date:
+        shift.date || "",
+
+      start:
+        shift.start || "",
+
+      end:
+        shift.end || "",
+
+      breakMinutes:
+        numberOrZero(
+          shift.breakMinutes
+        ),
+
+      category:
+        shift.category ||
+        "regular",
+
+      holiday:
+        Boolean(
+          shift.holiday
+        ),
+
+      nightDifferential:
+        numberOrZero(
+          shift.nightDifferential
+        ) || 1,
+
+      note:
+        shift.note || "",
+    });
+
+    setShowHoursModal(
+      true
+    );
   }
 
   /* =======================================================
@@ -527,7 +837,9 @@ export default function Income({
   ======================================================= */
 
   function handleSaveHours() {
-    if (!selectedJobId) return;
+    if (!selectedJobId) {
+      return;
+    }
 
     if (
       !hoursForm.date ||
@@ -537,12 +849,16 @@ export default function Income({
       return;
     }
 
-    const job = jobs.find(
-      (item) =>
-        item.id === selectedJobId
-    );
+    const job =
+      jobs.find(
+        (item) =>
+          item.id ===
+          selectedJobId
+      );
 
-    if (!job) return;
+    if (!job) {
+      return;
+    }
 
     const calculatedHours =
       calculateHours(
@@ -551,22 +867,29 @@ export default function Income({
         hoursForm.breakMinutes
       );
 
-    if (calculatedHours <= 0) {
+    if (
+      calculatedHours <= 0
+    ) {
       return;
     }
 
-    const newShift = {
-      id: makeId("shift"),
-      date: hoursForm.date,
-      start: hoursForm.start,
-      end: hoursForm.end,
+    const shiftData = {
+      date:
+        hoursForm.date,
+
+      start:
+        hoursForm.start,
+
+      end:
+        hoursForm.end,
 
       breakMinutes:
         numberOrZero(
           hoursForm.breakMinutes
         ),
 
-      hours: calculatedHours,
+      hours:
+        calculatedHours,
 
       category:
         hoursForm.holiday
@@ -574,7 +897,9 @@ export default function Income({
           : hoursForm.category,
 
       holiday:
-        Boolean(hoursForm.holiday),
+        Boolean(
+          hoursForm.holiday
+        ),
 
       nightDifferential:
         numberOrZero(
@@ -583,35 +908,121 @@ export default function Income({
 
       note:
         hoursForm.note || "",
-
-      createdAt:
-        new Date().toISOString(),
     };
 
     /*
-     * IMPORTANT:
-     * Hours are saved using the JOB ID.
-     *
-     * This prevents Zai's A&W hours
-     * from being mixed with Ariel's
-     * Witron hours.
+     * =====================================================
+     * EDIT EXISTING SHIFT
+     * =====================================================
      */
 
-    setHoursByJob((previous) => ({
-      ...previous,
+    if (editingShiftId) {
+      setHoursByJob(
+        (previous) => {
+          const current =
+            Array.isArray(
+              previous[
+                selectedJobId
+              ]
+            )
+              ? previous[
+                  selectedJobId
+                ]
+              : [];
 
-      [selectedJobId]: [
-        ...(Array.isArray(
-          previous[selectedJobId]
-        )
-          ? previous[selectedJobId]
-          : []),
+          const updated =
+            current.map(
+              (shift) =>
+                shift.id ===
+                editingShiftId
+                  ? {
+                      ...shift,
+                      ...shiftData,
+                      updatedAt:
+                        new Date().toISOString(),
+                    }
+                  : shift
+            );
 
-        newShift,
-      ],
-    }));
+          return {
+            ...previous,
 
-    setShowHoursModal(false);
+            /*
+             * Sort immediately after
+             * editing.
+             */
+            [selectedJobId]:
+              sortShifts(
+                updated
+              ),
+          };
+        }
+      );
+    } else {
+      /*
+       * ===================================================
+       * ADD NEW SHIFT
+       * ===================================================
+       */
+
+      const newShift = {
+        id: makeId(
+          "shift"
+        ),
+
+        ...shiftData,
+
+        createdAt:
+          new Date().toISOString(),
+      };
+
+      setHoursByJob(
+        (previous) => {
+          const current =
+            Array.isArray(
+              previous[
+                selectedJobId
+              ]
+            )
+              ? previous[
+                  selectedJobId
+                ]
+              : [];
+
+          const updated = [
+            ...current,
+            newShift,
+          ];
+
+          return {
+            ...previous,
+
+            /*
+             * Sort immediately after
+             * adding.
+             */
+            [selectedJobId]:
+              sortShifts(
+                updated
+              ),
+          };
+        }
+      );
+    }
+
+    /*
+     * Close modal.
+     */
+    setShowHoursModal(
+      false
+    );
+
+    /*
+     * Clear editing state.
+     */
+    setEditingShiftId(
+      null
+    );
 
     setHoursForm({
       date: "",
@@ -633,25 +1044,54 @@ export default function Income({
     jobId,
     shiftId
   ) {
-    setHoursByJob((previous) => ({
-      ...previous,
+    const confirmed =
+      window.confirm(
+        "Remove this work shift?"
+      );
 
-      [jobId]: getJobHours(
-        jobId
-      ).filter(
-        (shift) =>
-          shift.id !== shiftId
-      ),
-    }));
+    if (!confirmed) {
+      return;
+    }
+
+    setHoursByJob(
+      (previous) => {
+        const current =
+          Array.isArray(
+            previous[jobId]
+          )
+            ? previous[jobId]
+            : [];
+
+        const updated =
+          current.filter(
+            (shift) =>
+              shift.id !==
+              shiftId
+          );
+
+        return {
+          ...previous,
+
+          [jobId]:
+            sortShifts(
+              updated
+            ),
+        };
+      }
+    );
   }
 
   /* =======================================================
-     PAYROLL CALCULATION
+     PAYROLL
   ======================================================= */
 
-  function calculatePayroll(job) {
+  function calculatePayroll(
+    job
+  ) {
     const shifts =
-      getJobHours(job.id);
+      getJobHours(
+        job.id
+      );
 
     let regularHours = 0;
     let overtimeHours = 0;
@@ -661,55 +1101,60 @@ export default function Income({
     let overtimePay = 0;
     let holidayPay = 0;
 
-    shifts.forEach((shift) => {
-      const hours =
-        numberOrZero(
-          shift.hours
-        );
+    shifts.forEach(
+      (shift) => {
+        const hours =
+          numberOrZero(
+            shift.hours
+          );
 
-      const differential =
-        numberOrZero(
-          shift.nightDifferential
-        ) || 1;
+        const differential =
+          numberOrZero(
+            shift.nightDifferential
+          ) || 1;
 
-      if (
-        shift.category ===
-          "holiday" ||
-        shift.holiday
-      ) {
-        holidayHours += hours;
+        if (
+          shift.category ===
+            "holiday" ||
+          shift.holiday
+        ) {
+          holidayHours +=
+            hours;
 
-        holidayPay +=
+          holidayPay +=
+            hours *
+            job.hourlyRate *
+            job.holidayMultiplier *
+            differential;
+
+          return;
+        }
+
+        if (
+          shift.category ===
+          "overtime"
+        ) {
+          overtimeHours +=
+            hours;
+
+          overtimePay +=
+            hours *
+            job.hourlyRate *
+            job.overtimeMultiplier *
+            differential;
+
+          return;
+        }
+
+        regularHours +=
+          hours;
+
+        regularPay +=
           hours *
           job.hourlyRate *
-          job.holidayMultiplier *
           differential;
-
-        return;
       }
-
-      if (
-        shift.category ===
-        "overtime"
-      ) {
-        overtimeHours += hours;
-
-        overtimePay +=
-          hours *
-          job.hourlyRate *
-          job.overtimeMultiplier *
-          differential;
-
-        return;
-      }
-
-      regularHours += hours;
-
-      regularPay +=
-        hours *
-        job.hourlyRate *
-        differential;
-    });
+    );
 
     const gross =
       regularPay +
@@ -717,11 +1162,10 @@ export default function Income({
       holidayPay;
 
     /*
-     * This is an ESTIMATE only.
-     * The actual payroll deduction can
-     * differ from this percentage.
+     * Estimated only.
+     * Actual payroll deductions
+     * may be different.
      */
-
     const estimatedNet =
       gross * 0.8;
 
@@ -729,16 +1173,18 @@ export default function Income({
       regularHours,
       overtimeHours,
       holidayHours,
+
       regularPay,
       overtimePay,
       holidayPay,
+
       gross,
       estimatedNet,
     };
   }
 
   /* =======================================================
-     FILTER / SUMMARY
+     HOUSEHOLD TOTAL
   ======================================================= */
 
   const totalHouseholdGross =
@@ -746,8 +1192,9 @@ export default function Income({
       return jobs.reduce(
         (total, job) =>
           total +
-          calculatePayroll(job)
-            .gross,
+          calculatePayroll(
+            job
+          ).gross,
         0
       );
     }, [
@@ -764,10 +1211,13 @@ export default function Income({
       style={{
         minHeight:
           "100vh",
+
         background:
           "var(--page-bg, #fff8fb)",
+
         color:
           "var(--text-primary, #281927)",
+
         paddingBottom:
           "120px",
       }}
@@ -784,12 +1234,18 @@ export default function Income({
       >
         <div
           style={{
-            fontSize: "15px",
-            fontWeight: 800,
+            fontSize:
+              "15px",
+
+            fontWeight:
+              800,
+
             letterSpacing:
               "0.16em",
+
             color:
               "#9b6b8c",
+
             marginBottom:
               "15px",
           }}
@@ -800,10 +1256,16 @@ export default function Income({
         <h1
           style={{
             margin: 0,
+
             fontSize:
               "46px",
-            lineHeight: 1.05,
-            fontWeight: 800,
+
+            lineHeight:
+              1.05,
+
+            fontWeight:
+              800,
+
             letterSpacing:
               "-0.04em",
           }}
@@ -815,9 +1277,13 @@ export default function Income({
           style={{
             margin:
               "14px 0 0",
+
             fontSize:
               "19px",
-            lineHeight: 1.45,
+
+            lineHeight:
+              1.45,
+
             color:
               "#a47796",
           }}
@@ -836,12 +1302,16 @@ export default function Income({
         style={{
           margin:
             "0 29px 25px",
+
           background:
             "#ffffff",
+
           border:
             "2px solid #f0dce6",
+
           borderRadius:
             "25px",
+
           padding:
             "28px 29px",
         }}
@@ -850,11 +1320,16 @@ export default function Income({
           style={{
             display:
               "flex",
+
             alignItems:
               "center",
+
             justifyContent:
               "space-between",
-            gap: "15px",
+
+            gap:
+              "15px",
+
             marginBottom:
               "24px",
           }}
@@ -862,10 +1337,13 @@ export default function Income({
           <h2
             style={{
               margin: 0,
+
               fontSize:
                 "18px",
+
               letterSpacing:
                 "0.08em",
+
               color:
                 "#976d8d",
             }}
@@ -878,19 +1356,24 @@ export default function Income({
             onClick={
               handleNewJob
             }
-            style={primaryButton}
+            style={
+              primaryButton
+            }
           >
             + New Job
           </button>
         </div>
 
-        {jobs.length === 0 && (
+        {jobs.length ===
+          0 && (
           <div
             style={{
               padding:
                 "30px",
+
               textAlign:
                 "center",
+
               color:
                 "#9b7591",
             }}
@@ -899,528 +1382,777 @@ export default function Income({
           </div>
         )}
 
-        {jobs.map((job) => {
-          const isOpen =
-            Boolean(
-              openJobs[job.id]
-            );
+        {jobs.map(
+          (job) => {
+            const isOpen =
+              Boolean(
+                openJobs[
+                  job.id
+                ]
+              );
 
-          const payroll =
-            calculatePayroll(
-              job
-            );
+            const payroll =
+              calculatePayroll(
+                job
+              );
 
-          const shifts =
-            getJobHours(
-              job.id
-            );
+            const shifts =
+              getJobHours(
+                job.id
+              );
 
-          return (
-            <div
-              key={job.id}
-              style={{
-                marginBottom:
-                  "18px",
-                border:
-                  isOpen
-                    ? "4px solid #df5c91"
-                    : "2px solid #f0dce6",
-                borderRadius:
-                  "28px",
-                padding:
-                  "28px",
-                background:
-                  "#fff",
-              }}
-            >
-              {/* JOB HEADER */}
-
+            return (
               <div
+                key={
+                  job.id
+                }
                 style={{
-                  display:
-                    "flex",
-                  justifyContent:
-                    "space-between",
-                  alignItems:
-                    "center",
-                  gap:
-                    "20px",
+                  marginBottom:
+                    "18px",
+
+                  border:
+                    isOpen
+                      ? "4px solid #df5c91"
+                      : "2px solid #f0dce6",
+
+                  borderRadius:
+                    "28px",
+
+                  padding:
+                    "28px",
+
+                  background:
+                    "#fff",
                 }}
               >
+                {/* JOB HEADER */}
+
                 <div
                   style={{
-                    minWidth:
-                      0,
+                    display:
+                      "flex",
+
+                    justifyContent:
+                      "space-between",
+
+                    alignItems:
+                      "center",
+
+                    gap:
+                      "20px",
                   }}
                 >
-                  <h3
-                    style={{
-                      margin:
-                        "0 0 8px",
-                      fontSize:
-                        "30px",
-                      lineHeight:
-                        1.1,
-                    }}
-                  >
-                    {job.owner} —{" "}
-                    {job.employer}
-                  </h3>
-
                   <div
                     style={{
-                      fontSize:
-                        "18px",
-                      color:
-                        "#8e6680",
+                      minWidth:
+                        0,
                     }}
                   >
-                    {job.position
-                      ? `${job.position} · `
-                      : ""}
-                    {money(
-                      job.hourlyRate
-                    )}
-                    /hr
+                    <h3
+                      style={{
+                        margin:
+                          "0 0 8px",
+
+                        fontSize:
+                          "30px",
+
+                        lineHeight:
+                          1.1,
+                      }}
+                    >
+                      {job.owner} —{" "}
+                      {
+                        job.employer
+                      }
+                    </h3>
+
+                    <div
+                      style={{
+                        fontSize:
+                          "18px",
+
+                        color:
+                          "#8e6680",
+                      }}
+                    >
+                      {job.position
+                        ? `${job.position} · `
+                        : ""}
+
+                      {money(
+                        job.hourlyRate
+                      )}
+                      /hr
+                    </div>
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      toggleJob(
+                        job.id
+                      )
+                    }
+                    style={{
+                      ...primaryButton,
+
+                      minWidth:
+                        "145px",
+                    }}
+                  >
+                    {isOpen
+                      ? "Opened"
+                      : "Open"}
+                  </button>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() =>
-                    toggleJob(
-                      job.id
-                    )
-                  }
-                  style={{
-                    ...primaryButton,
-                    minWidth:
-                      "145px",
-                  }}
-                >
-                  {isOpen
-                    ? "Opened"
-                    : "Open"}
-                </button>
-              </div>
+                {/* =================================================
+                    OPEN JOB
+                ================================================= */}
 
-              {/* =================================================
-                  EXPANDED JOB
-              ================================================= */}
-
-              {isOpen && (
-                <div
-                  style={{
-                    marginTop:
-                      "25px",
-                  }}
-                >
-                  <div
-                    style={{
-                      borderTop:
-                        "2px solid #f0dce6",
-                      paddingTop:
-                        "25px",
-                      display:
-                        "flex",
-                      gap:
-                        "15px",
-                      flexWrap:
-                        "wrap",
-                    }}
-                  >
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleOpenHours(
-                          job
-                        )
-                      }
-                      style={{
-                        ...primaryButton,
-                        flex:
-                          "1 1 180px",
-                      }}
-                    >
-                      + Add Hours
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleEditJob(
-                          job
-                        )
-                      }
-                      style={{
-                        ...secondaryButton,
-                        flex:
-                          "1 1 180px",
-                      }}
-                    >
-                      ✏️ Edit Job
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleDeleteJob(
-                          job.id
-                        )
-                      }
-                      style={{
-                        ...deleteButton,
-                        flex:
-                          "1 1 180px",
-                      }}
-                    >
-                      Delete Job
-                    </button>
-                  </div>
-
-                  {/* PAY SCHEDULE */}
-
+                {isOpen && (
                   <div
                     style={{
                       marginTop:
                         "25px",
-                      padding:
-                        "25px",
-                      border:
-                        "2px solid #f3dda8",
-                      background:
-                        "#fffaf0",
-                      borderRadius:
-                        "22px",
                     }}
                   >
-                    <div
-                      style={{
-                        fontWeight:
-                          800,
-                        color:
-                          "#97742f",
-                        fontSize:
-                          "17px",
-                        letterSpacing:
-                          "0.08em",
-                        marginBottom:
-                          "15px",
-                      }}
-                    >
-                      PAY SCHEDULE
-                    </div>
-
-                    <div
-                      style={{
-                        fontSize:
-                          "18px",
-                        lineHeight:
-                          1.7,
-                        color:
-                          "#806a48",
-                      }}
-                    >
-                      {job.payPeriodStart &&
-                      job.payPeriodEnd ? (
-                        <>
-                          Pay period:{" "}
-                          <strong>
-                            {formatDate(
-                              job.payPeriodStart
-                            )}{" "}
-                            –{" "}
-                            {formatDate(
-                              job.payPeriodEnd
-                            )}
-                          </strong>
-                          <br />
-                          Payday:{" "}
-                          <strong
-                            style={{
-                              color:
-                                "#d62e72",
-                            }}
-                          >
-                            {formatDate(
-                              job.payday
-                            )}
-                          </strong>
-                        </>
-                      ) : (
-                        <>
-                          ⚠️ Pay schedule needs
-                          to be configured.
-                          <br />
-                          Tap{" "}
-                          <strong>
-                            Edit Job
-                          </strong>{" "}
-                          and enter the pay-period
-                          start, end, and payday.
-                        </>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* SUMMARY */}
-
-                  <div
-                    style={{
-                      display:
-                        "grid",
-                      gridTemplateColumns:
-                        "repeat(3, minmax(0, 1fr))",
-                      gap:
-                        "15px",
-                      marginTop:
-                        "25px",
-                    }}
-                  >
-                    <SummaryBox
-                      label="HOURS"
-                      value={
-                        (
-                          payroll.regularHours +
-                          payroll.overtimeHours +
-                          payroll.holidayHours
-                        ).toFixed(2)
-                      }
-                    />
-
-                    <SummaryBox
-                      label="GROSS"
-                      value={money(
-                        payroll.gross
-                      )}
-                    />
-
-                    <SummaryBox
-                      label="EST. NET"
-                      value={money(
-                        payroll.estimatedNet
-                      )}
-                    />
-                  </div>
-
-                  {/* WORK HOURS */}
-
-                  <div
-                    style={{
-                      marginTop:
-                        "28px",
-                    }}
-                  >
-                    <h4
-                      style={{
-                        margin:
-                          "0 0 15px",
-                        fontSize:
-                          "18px",
-                        letterSpacing:
-                          "0.08em",
-                        color:
-                          "#976d8d",
-                      }}
-                    >
-                      WORK HOURS
-                    </h4>
-
-                    {shifts.length ===
-                    0 ? (
-                      <div
-                        style={{
-                          background:
-                            "#fff5f9",
-                          borderRadius:
-                            "20px",
-                          padding:
-                            "24px",
-                          textAlign:
-                            "center",
-                          color:
-                            "#a47796",
-                          fontSize:
-                            "17px",
-                        }}
-                      >
-                        No work hours entered
-                        for this pay period yet.
-                      </div>
-                    ) : (
-                      <div>
-                        {shifts.map(
-                          (shift) => (
-                            <div
-                              key={
-                                shift.id
-                              }
-                              style={{
-                                display:
-                                  "flex",
-                                justifyContent:
-                                  "space-between",
-                                alignItems:
-                                  "center",
-                                gap:
-                                  "15px",
-                                padding:
-                                  "16px",
-                                marginBottom:
-                                  "10px",
-                                background:
-                                  "#fff7fa",
-                                borderRadius:
-                                  "15px",
-                              }}
-                            >
-                              <div>
-                                <strong>
-                                  {formatDate(
-                                    shift.date
-                                  )}
-                                </strong>
-
-                                <div
-                                  style={{
-                                    color:
-                                      "#8e6680",
-                                    marginTop:
-                                      "4px",
-                                  }}
-                                >
-                                  {shift.start}{" "}
-                                  –{" "}
-                                  {shift.end}
-                                  {" · "}
-                                  {Number(
-                                    shift.hours
-                                  ).toFixed(
-                                    2
-                                  )}{" "}
-                                  hrs
-                                  {" · "}
-                                  {shift.category}
-                                </div>
-                              </div>
-
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  handleDeleteShift(
-                                    job.id,
-                                    shift.id
-                                  )
-                                }
-                                style={{
-                                  border:
-                                    "none",
-                                  background:
-                                    "transparent",
-                                  color:
-                                    "#c84d70",
-                                  fontWeight:
-                                    700,
-                                  cursor:
-                                    "pointer",
-                                }}
-                              >
-                                Remove
-                              </button>
-                            </div>
-                          )
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* PAYCHECK ESTIMATE */}
-
-                  <div
-                    style={{
-                      marginTop:
-                        "25px",
-                      padding:
-                        "25px",
-                      border:
-                        "2px solid #d7eddf",
-                      background:
-                        "#f5fbf7",
-                      borderRadius:
-                        "22px",
-                    }}
-                  >
-                    <h4
-                      style={{
-                        margin:
-                          "0 0 20px",
-                        color:
-                          "#4a8a66",
-                        fontSize:
-                          "17px",
-                      }}
-                    >
-                      PAYCHECK ESTIMATE
-                    </h4>
-
-                    <PayRow
-                      label="Regular"
-                      value={`${payroll.regularHours.toFixed(
-                        2
-                      )} hrs · ${money(
-                        payroll.regularPay
-                      )}`}
-                    />
-
-                    <PayRow
-                      label="Overtime"
-                      value={`${payroll.overtimeHours.toFixed(
-                        2
-                      )} hrs · ${money(
-                        payroll.overtimePay
-                      )}`}
-                    />
-
-                    <PayRow
-                      label="Holiday"
-                      value={money(
-                        payroll.holidayPay
-                      )}
-                    />
+                    {/* BUTTONS */}
 
                     <div
                       style={{
                         borderTop:
-                          "2px solid #d7eddf",
-                        marginTop:
-                          "12px",
+                          "2px solid #f0dce6",
+
                         paddingTop:
+                          "25px",
+
+                        display:
+                          "flex",
+
+                        gap:
                           "15px",
+
+                        flexWrap:
+                          "wrap",
                       }}
                     >
-                      <PayRow
-                        label="Estimated Gross"
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleOpenHours(
+                            job
+                          )
+                        }
+                        style={{
+                          ...primaryButton,
+
+                          flex:
+                            "1 1 180px",
+                        }}
+                      >
+                        + Add Hours
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleEditJob(
+                            job
+                          )
+                        }
+                        style={{
+                          ...secondaryButton,
+
+                          flex:
+                            "1 1 180px",
+                        }}
+                      >
+                        ✏️ Edit Job
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleDeleteJob(
+                            job.id
+                          )
+                        }
+                        style={{
+                          ...deleteButton,
+
+                          flex:
+                            "1 1 180px",
+                        }}
+                      >
+                        Delete Job
+                      </button>
+                    </div>
+
+                    {/* =================================================
+                        PAY SCHEDULE
+                    ================================================= */}
+
+                    <div
+                      style={{
+                        marginTop:
+                          "25px",
+
+                        padding:
+                          "25px",
+
+                        border:
+                          "2px solid #f3dda8",
+
+                        background:
+                          "#fffaf0",
+
+                        borderRadius:
+                          "22px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontWeight:
+                            800,
+
+                          color:
+                            "#97742f",
+
+                          fontSize:
+                            "17px",
+
+                          letterSpacing:
+                            "0.08em",
+
+                          marginBottom:
+                            "15px",
+                        }}
+                      >
+                        PAY SCHEDULE
+                      </div>
+
+                      <div
+                        style={{
+                          fontSize:
+                            "18px",
+
+                          lineHeight:
+                            1.7,
+
+                          color:
+                            "#806a48",
+                        }}
+                      >
+                        {job.payPeriodStart &&
+                        job.payPeriodEnd ? (
+                          <>
+                            Pay period:{" "}
+                            <strong>
+                              {formatDate(
+                                job.payPeriodStart
+                              )}{" "}
+                              –{" "}
+                              {formatDate(
+                                job.payPeriodEnd
+                              )}
+                            </strong>
+
+                            <br />
+
+                            Payday:{" "}
+                            <strong
+                              style={{
+                                color:
+                                  "#d62e72",
+                              }}
+                            >
+                              {formatDate(
+                                job.payday
+                              )}
+                            </strong>
+                          </>
+                        ) : (
+                          <>
+                            ⚠️ Pay schedule needs
+                            to be configured.
+                            <br />
+
+                            Tap{" "}
+                            <strong>
+                              Edit Job
+                            </strong>{" "}
+                            and enter the pay-period
+                            start, end, and payday.
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* =================================================
+                        SUMMARY
+                    ================================================= */}
+
+                    <div
+                      style={{
+                        display:
+                          "grid",
+
+                        gridTemplateColumns:
+                          "repeat(3, minmax(0, 1fr))",
+
+                        gap:
+                          "15px",
+
+                        marginTop:
+                          "25px",
+                      }}
+                    >
+                      <SummaryBox
+                        label="HOURS"
+                        value={(
+                          payroll.regularHours +
+                          payroll.overtimeHours +
+                          payroll.holidayHours
+                        ).toFixed(
+                          2
+                        )}
+                      />
+
+                      <SummaryBox
+                        label="GROSS"
                         value={money(
                           payroll.gross
                         )}
-                        strong
                       />
 
-                      <PayRow
-                        label="Estimated Net"
+                      <SummaryBox
+                        label="EST. NET"
                         value={money(
                           payroll.estimatedNet
                         )}
-                        strong
-                        green
                       />
                     </div>
+
+                    {/* =================================================
+                        WORK HOURS
+                    ================================================= */}
+
+                    <div
+                      style={{
+                        marginTop:
+                          "28px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display:
+                            "flex",
+
+                          justifyContent:
+                            "space-between",
+
+                          alignItems:
+                            "center",
+
+                          marginBottom:
+                            "15px",
+                        }}
+                      >
+                        <h4
+                          style={{
+                            margin: 0,
+
+                            fontSize:
+                              "18px",
+
+                            letterSpacing:
+                              "0.08em",
+
+                            color:
+                              "#976d8d",
+                          }}
+                        >
+                          WORK HOURS
+                        </h4>
+
+                        {shifts.length >
+                          0 && (
+                          <span
+                            style={{
+                              fontSize:
+                                "14px",
+
+                              color:
+                                "#a47796",
+                            }}
+                          >
+                            {shifts.length}{" "}
+                            {shifts.length ===
+                            1
+                              ? "shift"
+                              : "shifts"}
+                          </span>
+                        )}
+                      </div>
+
+                      {shifts.length ===
+                      0 ? (
+                        <div
+                          style={{
+                            background:
+                              "#fff5f9",
+
+                            borderRadius:
+                              "20px",
+
+                            padding:
+                              "24px",
+
+                            textAlign:
+                              "center",
+
+                            color:
+                              "#a47796",
+
+                            fontSize:
+                              "17px",
+                          }}
+                        >
+                          No work hours entered
+                          for this pay period yet.
+                        </div>
+                      ) : (
+                        <div>
+                          {/*
+                           * IMPORTANT:
+                           *
+                           * getJobHours()
+                           * already sorts the
+                           * shifts by date.
+                           *
+                           * So even if the user
+                           * enters:
+                           *
+                           * Aug 4
+                           * Aug 1
+                           * Aug 3
+                           * Aug 2
+                           *
+                           * it displays:
+                           *
+                           * Aug 1
+                           * Aug 2
+                           * Aug 3
+                           * Aug 4
+                           */}
+
+                          {shifts.map(
+                            (
+                              shift,
+                              index
+                            ) => (
+                              <div
+                                key={
+                                  shift.id
+                                }
+                                style={{
+                                  background:
+                                    "#fff7fa",
+
+                                  border:
+                                    "1px solid #f0dce6",
+
+                                  borderRadius:
+                                    "18px",
+
+                                  padding:
+                                    "18px",
+
+                                  marginBottom:
+                                    "12px",
+                                }}
+                              >
+                                {/* DATE / SHIFT */}
+
+                                <div
+                                  style={{
+                                    display:
+                                      "flex",
+
+                                    justifyContent:
+                                      "space-between",
+
+                                    alignItems:
+                                      "flex-start",
+
+                                    gap:
+                                      "15px",
+                                  }}
+                                >
+                                  <div>
+                                    <div
+                                      style={{
+                                        fontWeight:
+                                          800,
+
+                                        fontSize:
+                                          "18px",
+
+                                        color:
+                                          "#352534",
+                                      }}
+                                    >
+                                      {formatDate(
+                                        shift.date
+                                      )}
+                                    </div>
+
+                                    <div
+                                      style={{
+                                        marginTop:
+                                          "6px",
+
+                                        color:
+                                          "#8e6680",
+
+                                        fontSize:
+                                          "16px",
+                                      }}
+                                    >
+                                      {shift.start}{" "}
+                                      –{" "}
+                                      {shift.end}
+                                    </div>
+
+                                    <div
+                                      style={{
+                                        marginTop:
+                                          "5px",
+
+                                        color:
+                                          "#a47796",
+
+                                        fontSize:
+                                          "15px",
+                                      }}
+                                    >
+                                      {Number(
+                                        shift.hours
+                                      ).toFixed(
+                                        2
+                                      )}{" "}
+                                      hrs
+                                      {" · "}
+                                      {shift.category ===
+                                      "holiday"
+                                        ? "Holiday"
+                                        : shift.category ===
+                                          "overtime"
+                                        ? "Overtime"
+                                        : "Regular"}
+                                    </div>
+
+                                    {shift.note && (
+                                      <div
+                                        style={{
+                                          marginTop:
+                                            "6px",
+
+                                          color:
+                                            "#8e6680",
+
+                                          fontSize:
+                                            "14px",
+
+                                          fontStyle:
+                                            "italic",
+                                        }}
+                                      >
+                                        {shift.note}
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* EDIT / DELETE */}
+
+                                  <div
+                                    style={{
+                                      display:
+                                        "flex",
+
+                                      gap:
+                                        "8px",
+
+                                      flexShrink:
+                                        0,
+                                    }}
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleEditShift(
+                                          job,
+                                          shift
+                                        )
+                                      }
+                                      style={{
+                                        ...smallEditButton,
+                                      }}
+                                    >
+                                      ✏️ Edit
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleDeleteShift(
+                                          job.id,
+                                          shift.id
+                                        )
+                                      }
+                                      style={{
+                                        ...smallDeleteButton,
+                                      }}
+                                    >
+                                      Remove
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {/* DAY NUMBER */}
+
+                                <div
+                                  style={{
+                                    marginTop:
+                                      "12px",
+
+                                    paddingTop:
+                                      "10px",
+
+                                    borderTop:
+                                      "1px solid #f0dce6",
+
+                                    color:
+                                      "#b17b99",
+
+                                    fontSize:
+                                      "13px",
+                                  }}
+                                >
+                                  Shift{" "}
+                                  {index +
+                                    1}{" "}
+                                  ·{" "}
+                                  {formatDate(
+                                    shift.date
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* =================================================
+                        PAYCHECK ESTIMATE
+                    ================================================= */}
+
+                    <div
+                      style={{
+                        marginTop:
+                          "25px",
+
+                        padding:
+                          "25px",
+
+                        border:
+                          "2px solid #d7eddf",
+
+                        background:
+                          "#f5fbf7",
+
+                        borderRadius:
+                          "22px",
+                      }}
+                    >
+                      <h4
+                        style={{
+                          margin:
+                            "0 0 20px",
+
+                          color:
+                            "#4a8a66",
+
+                          fontSize:
+                            "17px",
+                        }}
+                      >
+                        PAYCHECK ESTIMATE
+                      </h4>
+
+                      <PayRow
+                        label="Regular"
+                        value={`${payroll.regularHours.toFixed(
+                          2
+                        )} hrs · ${money(
+                          payroll.regularPay
+                        )}`}
+                      />
+
+                      <PayRow
+                        label="Overtime"
+                        value={`${payroll.overtimeHours.toFixed(
+                          2
+                        )} hrs · ${money(
+                          payroll.overtimePay
+                        )}`}
+                      />
+
+                      <PayRow
+                        label="Holiday"
+                        value={money(
+                          payroll.holidayPay
+                        )}
+                      />
+
+                      <div
+                        style={{
+                          borderTop:
+                            "2px solid #d7eddf",
+
+                          marginTop:
+                            "12px",
+
+                          paddingTop:
+                            "15px",
+                        }}
+                      >
+                        <PayRow
+                          label="Estimated Gross"
+                          value={money(
+                            payroll.gross
+                          )}
+                          strong
+                        />
+
+                        <PayRow
+                          label="Estimated Net"
+                          value={money(
+                            payroll.estimatedNet
+                          )}
+                          strong
+                          green
+                        />
+                      </div>
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
+                )}
+              </div>
+            );
+          }
+        )}
       </section>
 
       {/* =================================================
@@ -1431,12 +2163,16 @@ export default function Income({
         style={{
           margin:
             "0 29px 30px",
+
           background:
             "#fff",
+
           border:
             "2px solid #f0dce6",
+
           borderRadius:
             "24px",
+
           padding:
             "25px",
         }}
@@ -1445,10 +2181,13 @@ export default function Income({
           style={{
             color:
               "#976d8d",
+
             fontSize:
               "15px",
+
             fontWeight:
               800,
+
             letterSpacing:
               "0.08em",
           }}
@@ -1460,8 +2199,10 @@ export default function Income({
           style={{
             marginTop:
               "10px",
+
             fontSize:
               "32px",
+
             fontWeight:
               800,
           }}
@@ -1489,8 +2230,13 @@ export default function Income({
                 : "New Job / Employer"
             }
             onClose={() => {
-              setShowJobModal(false);
-              setEditingJob(null);
+              setShowJobModal(
+                false
+              );
+
+              setEditingJob(
+                null
+              );
             }}
           >
             <Input
@@ -1498,7 +2244,9 @@ export default function Income({
               value={
                 editingJob.owner
               }
-              onChange={(value) =>
+              onChange={(
+                value
+              ) =>
                 setEditingJob(
                   (previous) => ({
                     ...previous,
@@ -1514,11 +2262,14 @@ export default function Income({
               value={
                 editingJob.employer
               }
-              onChange={(value) =>
+              onChange={(
+                value
+              ) =>
                 setEditingJob(
                   (previous) => ({
                     ...previous,
-                    employer: value,
+                    employer:
+                      value,
                   })
                 )
               }
@@ -1530,11 +2281,14 @@ export default function Income({
               value={
                 editingJob.position
               }
-              onChange={(value) =>
+              onChange={(
+                value
+              ) =>
                 setEditingJob(
                   (previous) => ({
                     ...previous,
-                    position: value,
+                    position:
+                      value,
                   })
                 )
               }
@@ -1548,11 +2302,14 @@ export default function Income({
               value={
                 editingJob.hourlyRate
               }
-              onChange={(value) =>
+              onChange={(
+                value
+              ) =>
                 setEditingJob(
                   (previous) => ({
                     ...previous,
-                    hourlyRate: value,
+                    hourlyRate:
+                      value,
                   })
                 )
               }
@@ -1563,8 +2320,10 @@ export default function Income({
               style={{
                 marginTop:
                   "20px",
+
                 fontWeight:
                   800,
+
                 color:
                   "#97742f",
               }}
@@ -1578,7 +2337,9 @@ export default function Income({
               value={
                 editingJob.payPeriodStart
               }
-              onChange={(value) =>
+              onChange={(
+                value
+              ) =>
                 setEditingJob(
                   (previous) => ({
                     ...previous,
@@ -1595,7 +2356,9 @@ export default function Income({
               value={
                 editingJob.payPeriodEnd
               }
-              onChange={(value) =>
+              onChange={(
+                value
+              ) =>
                 setEditingJob(
                   (previous) => ({
                     ...previous,
@@ -1612,7 +2375,9 @@ export default function Income({
               value={
                 editingJob.payday
               }
-              onChange={(value) =>
+              onChange={(
+                value
+              ) =>
                 setEditingJob(
                   (previous) => ({
                     ...previous,
@@ -1630,7 +2395,9 @@ export default function Income({
               value={
                 editingJob.overtimeMultiplier
               }
-              onChange={(value) =>
+              onChange={(
+                value
+              ) =>
                 setEditingJob(
                   (previous) => ({
                     ...previous,
@@ -1648,7 +2415,9 @@ export default function Income({
               value={
                 editingJob.holidayMultiplier
               }
-              onChange={(value) =>
+              onChange={(
+                value
+              ) =>
                 setEditingJob(
                   (previous) => ({
                     ...previous,
@@ -1663,8 +2432,10 @@ export default function Income({
               style={{
                 display:
                   "flex",
+
                 gap:
                   "12px",
+
                 marginTop:
                   "25px",
               }}
@@ -1676,6 +2447,7 @@ export default function Income({
                 }
                 style={{
                   ...primaryButton,
+
                   flex: 1,
                 }}
               >
@@ -1688,12 +2460,14 @@ export default function Income({
                   setShowJobModal(
                     false
                   );
+
                   setEditingJob(
                     null
                   );
                 }}
                 style={{
                   ...secondaryButton,
+
                   flex: 1,
                 }}
               >
@@ -1709,12 +2483,20 @@ export default function Income({
 
       {showHoursModal && (
         <Modal
-          title="Add Work Hours"
-          onClose={() =>
+          title={
+            editingShiftId
+              ? "Edit Work Hours"
+              : "Add Work Hours"
+          }
+          onClose={() => {
             setShowHoursModal(
               false
-            )
-          }
+            );
+
+            setEditingShiftId(
+              null
+            );
+          }}
         >
           <Input
             label="Work Date"
@@ -1722,7 +2504,9 @@ export default function Income({
             value={
               hoursForm.date
             }
-            onChange={(value) =>
+            onChange={(
+              value
+            ) =>
               setHoursForm(
                 (previous) => ({
                   ...previous,
@@ -1736,8 +2520,10 @@ export default function Income({
             style={{
               display:
                 "grid",
+
               gridTemplateColumns:
                 "1fr 1fr",
+
               gap:
                 "15px",
             }}
@@ -1748,7 +2534,9 @@ export default function Income({
               value={
                 hoursForm.start
               }
-              onChange={(value) =>
+              onChange={(
+                value
+              ) =>
                 setHoursForm(
                   (previous) => ({
                     ...previous,
@@ -1764,7 +2552,9 @@ export default function Income({
               value={
                 hoursForm.end
               }
-              onChange={(value) =>
+              onChange={(
+                value
+              ) =>
                 setHoursForm(
                   (previous) => ({
                     ...previous,
@@ -1781,7 +2571,9 @@ export default function Income({
             value={
               hoursForm.breakMinutes
             }
-            onChange={(value) =>
+            onChange={(
+              value
+            ) =>
               setHoursForm(
                 (previous) => ({
                   ...previous,
@@ -1796,8 +2588,10 @@ export default function Income({
             style={{
               display:
                 "block",
+
               marginTop:
                 "18px",
+
               fontWeight:
                 700,
             }}
@@ -1808,13 +2602,21 @@ export default function Income({
               value={
                 hoursForm.category
               }
-              onChange={(event) =>
+              onChange={(
+                event
+              ) =>
                 setHoursForm(
                   (previous) => ({
                     ...previous,
+
                     category:
                       event.target
                         .value,
+
+                    holiday:
+                      event.target
+                        .value ===
+                      "holiday",
                   })
                 )
               }
@@ -1843,10 +2645,13 @@ export default function Income({
             value={
               hoursForm.nightDifferential
             }
-            onChange={(value) =>
+            onChange={(
+              value
+            ) =>
               setHoursForm(
                 (previous) => ({
                   ...previous,
+
                   nightDifferential:
                     value,
                 })
@@ -1859,7 +2664,9 @@ export default function Income({
             value={
               hoursForm.note
             }
-            onChange={(value) =>
+            onChange={(
+              value
+            ) =>
               setHoursForm(
                 (previous) => ({
                   ...previous,
@@ -1870,20 +2677,27 @@ export default function Income({
             placeholder="Optional"
           />
 
+          {/* CALCULATED HOURS */}
+
           {hoursForm.start &&
             hoursForm.end && (
               <div
                 style={{
                   marginTop:
                     "20px",
+
                   padding:
                     "18px",
+
                   background:
                     "#fff5f9",
+
                   borderRadius:
                     "16px",
+
                   color:
                     "#8e6680",
+
                   fontWeight:
                     700,
                 }}
@@ -1893,7 +2707,9 @@ export default function Income({
                   hoursForm.start,
                   hoursForm.end,
                   hoursForm.breakMinutes
-                ).toFixed(2)}
+                ).toFixed(
+                  2
+                )}
               </div>
             )}
 
@@ -1904,12 +2720,17 @@ export default function Income({
             }
             style={{
               ...primaryButton,
-              width: "100%",
+
+              width:
+                "100%",
+
               marginTop:
                 "25px",
             }}
           >
-            Save Hours
+            {editingShiftId
+              ? "Save Changes"
+              : "Save Hours"}
           </button>
         </Modal>
       )}
@@ -1918,7 +2739,7 @@ export default function Income({
 }
 
 /* =========================================================
-   COMPONENTS
+   SUMMARY BOX
 ========================================================= */
 
 function SummaryBox({
@@ -1930,8 +2751,10 @@ function SummaryBox({
       style={{
         background:
           "#fff5f9",
+
         borderRadius:
           "18px",
+
         padding:
           "18px",
       }}
@@ -1940,8 +2763,10 @@ function SummaryBox({
         style={{
           color:
             "#a47796",
+
           fontSize:
             "14px",
+
           marginBottom:
             "7px",
         }}
@@ -1953,6 +2778,7 @@ function SummaryBox({
         style={{
           fontSize:
             "25px",
+
           fontWeight:
             800,
         }}
@@ -1962,6 +2788,10 @@ function SummaryBox({
     </div>
   );
 }
+
+/* =========================================================
+   PAY ROW
+========================================================= */
 
 function PayRow({
   label,
@@ -1974,18 +2804,24 @@ function PayRow({
       style={{
         display:
           "flex",
+
         justifyContent:
           "space-between",
+
         gap:
           "15px",
+
         marginBottom:
           "12px",
+
         fontWeight:
           strong ? 800 : 500,
+
         color:
           green
             ? "#4a8a66"
             : "#342734",
+
         fontSize:
           strong
             ? "19px"
@@ -2003,6 +2839,10 @@ function PayRow({
   );
 }
 
+/* =========================================================
+   INPUT
+========================================================= */
+
 function Input({
   label,
   value,
@@ -2016,10 +2856,13 @@ function Input({
       style={{
         display:
           "block",
+
         marginTop:
           "16px",
+
         fontWeight:
           700,
+
         color:
           "#6f5366",
       }}
@@ -2031,9 +2874,12 @@ function Input({
         value={
           value ?? ""
         }
-        onChange={(event) =>
+        onChange={(
+          event
+        ) =>
           onChange(
-            event.target.value
+            event.target
+              .value
           )
         }
         placeholder={
@@ -2048,6 +2894,10 @@ function Input({
   );
 }
 
+/* =========================================================
+   MODAL
+========================================================= */
+
 function Modal({
   title,
   children,
@@ -2055,7 +2905,9 @@ function Modal({
 }) {
   return (
     <div
-      onMouseDown={(event) => {
+      onMouseDown={(
+        event
+      ) => {
         if (
           event.target ===
           event.currentTarget
@@ -2066,18 +2918,27 @@ function Modal({
       style={{
         position:
           "fixed",
+
         inset: 0,
+
         background:
           "rgba(40,25,39,0.45)",
-        zIndex: 1000,
+
+        zIndex:
+          1000,
+
         display:
           "flex",
+
         alignItems:
           "center",
+
         justifyContent:
           "center",
+
         padding:
           "20px",
+
         overflowY:
           "auto",
       }}
@@ -2086,16 +2947,22 @@ function Modal({
         style={{
           width:
             "min(560px, 100%)",
+
           maxHeight:
             "90vh",
+
           overflowY:
             "auto",
+
           background:
             "#fff",
+
           borderRadius:
             "28px",
+
           padding:
             "28px",
+
           boxShadow:
             "0 20px 60px rgba(40,25,39,0.25)",
         }}
@@ -2104,12 +2971,16 @@ function Modal({
           style={{
             display:
               "flex",
+
             alignItems:
               "center",
+
             justifyContent:
               "space-between",
+
             gap:
               "15px",
+
             marginBottom:
               "10px",
           }}
@@ -2117,6 +2988,7 @@ function Modal({
           <h2
             style={{
               margin: 0,
+
               fontSize:
                 "28px",
             }}
@@ -2132,16 +3004,22 @@ function Modal({
             style={{
               border:
                 "none",
+
               background:
                 "#fff2f7",
+
               width:
                 "42px",
+
               height:
                 "42px",
+
               borderRadius:
                 "50%",
+
               fontSize:
                 "20px",
+
               cursor:
                 "pointer",
             }}
@@ -2157,69 +3035,217 @@ function Modal({
 }
 
 /* =========================================================
-   STYLES
+   BUTTON STYLES
 ========================================================= */
 
 const primaryButton = {
-  border: "none",
-  background: "#d94d86",
-  color: "#fff",
-  borderRadius: "17px",
-  padding: "17px 24px",
-  fontSize: "17px",
-  fontWeight: 800,
-  cursor: "pointer",
-  touchAction: "manipulation",
+  border:
+    "none",
+
+  background:
+    "#d94d86",
+
+  color:
+    "#fff",
+
+  borderRadius:
+    "17px",
+
+  padding:
+    "17px 24px",
+
+  fontSize:
+    "17px",
+
+  fontWeight:
+    800,
+
+  cursor:
+    "pointer",
+
+  touchAction:
+    "manipulation",
 };
 
 const secondaryButton = {
   border:
     "2px solid #f0dce6",
-  background: "#fff",
-  color: "#76566b",
-  borderRadius: "17px",
-  padding: "15px 22px",
-  fontSize: "17px",
-  fontWeight: 800,
-  cursor: "pointer",
-  touchAction: "manipulation",
+
+  background:
+    "#fff",
+
+  color:
+    "#76566b",
+
+  borderRadius:
+    "17px",
+
+  padding:
+    "15px 22px",
+
+  fontSize:
+    "17px",
+
+  fontWeight:
+    800,
+
+  cursor:
+    "pointer",
+
+  touchAction:
+    "manipulation",
 };
 
 const deleteButton = {
-  border: "none",
-  background: "#fff0f5",
-  color: "#c84d70",
-  borderRadius: "17px",
-  padding: "17px 22px",
-  fontSize: "17px",
-  fontWeight: 800,
-  cursor: "pointer",
-  touchAction: "manipulation",
+  border:
+    "none",
+
+  background:
+    "#fff0f5",
+
+  color:
+    "#c84d70",
+
+  borderRadius:
+    "17px",
+
+  padding:
+    "17px 22px",
+
+  fontSize:
+    "17px",
+
+  fontWeight:
+    800,
+
+  cursor:
+    "pointer",
+
+  touchAction:
+    "manipulation",
+};
+
+const smallEditButton = {
+  border:
+    "1px solid #ead5e0",
+
+  background:
+    "#fff",
+
+  color:
+    "#b83e72",
+
+  borderRadius:
+    "10px",
+
+  padding:
+    "9px 11px",
+
+  fontSize:
+    "13px",
+
+  fontWeight:
+    800,
+
+  cursor:
+    "pointer",
+
+  whiteSpace:
+    "nowrap",
+};
+
+const smallDeleteButton = {
+  border:
+    "none",
+
+  background:
+    "#fff0f5",
+
+  color:
+    "#c84d70",
+
+  borderRadius:
+    "10px",
+
+  padding:
+    "9px 11px",
+
+  fontSize:
+    "13px",
+
+  fontWeight:
+    700,
+
+  cursor:
+    "pointer",
+
+  whiteSpace:
+    "nowrap",
 };
 
 const inputStyle = {
-  display: "block",
-  width: "100%",
-  boxSizing: "border-box",
-  marginTop: "8px",
-  padding: "15px 16px",
-  border: "2px solid #ead5e0",
-  borderRadius: "14px",
-  background: "#fff",
-  color: "#342734",
-  fontSize: "17px",
-  outline: "none",
+  display:
+    "block",
+
+  width:
+    "100%",
+
+  boxSizing:
+    "border-box",
+
+  marginTop:
+    "8px",
+
+  padding:
+    "15px 16px",
+
+  border:
+    "2px solid #ead5e0",
+
+  borderRadius:
+    "14px",
+
+  background:
+    "#fff",
+
+  color:
+    "#342734",
+
+  fontSize:
+    "17px",
+
+  outline:
+    "none",
 };
 
 const selectStyle = {
-  display: "block",
-  width: "100%",
-  boxSizing: "border-box",
-  marginTop: "8px",
-  padding: "15px 16px",
-  border: "2px solid #ead5e0",
-  borderRadius: "14px",
-  background: "#fff",
-  color: "#342734",
-  fontSize: "17px",
+  display:
+    "block",
+
+  width:
+    "100%",
+
+  boxSizing:
+    "border-box",
+
+  marginTop:
+    "8px",
+
+  padding:
+    "15px 16px",
+
+  border:
+    "2px solid #ead5e0",
+
+  borderRadius:
+    "14px",
+
+  background:
+    "#fff",
+
+  color:
+    "#342734",
+
+  fontSize:
+    "17px",
 };
